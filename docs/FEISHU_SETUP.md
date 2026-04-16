@@ -54,6 +54,7 @@ STORAGE=feishu
 
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
+FEISHU_REDIRECT_URI=https://board.example.com/
 FEISHU_CHAT_ID=oc_xxx
 
 FEISHU_BITABLE_APP_TOKEN=xxx
@@ -77,6 +78,7 @@ SESSION_COOKIE_SAMESITE=Lax
 - `STORAGE`：设为 `feishu` 后，业务数据读写飞书多维表格。
 - `FEISHU_APP_ID`：飞书自建应用的 App ID。
 - `FEISHU_APP_SECRET`：飞书自建应用的 App Secret。
+- `FEISHU_REDIRECT_URI`：飞书登录回跳地址，必须和飞书后台“重定向 URL”完全一致，例如 `https://board.example.com/`。
 - `FEISHU_CHAT_ID`：归还请求要提醒的共享群 chat_id。
 - `FEISHU_BITABLE_APP_TOKEN`：目标多维表格 app token。
 - `FEISHU_*_TABLE_ID`：各业务表 table ID。
@@ -120,7 +122,13 @@ https://board.example.com
 
 电脑端和移动端可以先使用同一个地址。
 
-同时在应用后台的安全设置中添加安全域名：
+同时在应用后台的安全设置中添加重定向 URL，必须与 `FEISHU_REDIRECT_URI` 完全一致，例如：
+
+```text
+https://board.example.com/
+```
+
+然后在应用后台的安全设置中添加安全域名：
 
 ```text
 board.example.com

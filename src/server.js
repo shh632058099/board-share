@@ -121,6 +121,7 @@ async function handleAuthApi(req, res, deps) {
         devAuth: config.devAuth,
         feishuAuthEnabled: feishuClient.enabled,
         feishuAppId: config.feishu.appId,
+        redirectUri: config.feishu.redirectUri,
         loginUrl: 'https://open.feishu.cn/open-apis/authen/v1/index',
       },
     });

@@ -132,7 +132,7 @@ function showToast(message) {
 }
 
 function currentPageRedirectUri() {
-  return `${window.location.origin}${window.location.pathname}`;
+  return state.authConfig?.redirectUri || `${window.location.origin}${window.location.pathname}`;
 }
 
 function randomState() {

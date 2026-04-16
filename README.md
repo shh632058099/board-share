@@ -41,6 +41,7 @@ npm test
 
 - `FEISHU_APP_ID`
 - `FEISHU_APP_SECRET`
+- `FEISHU_REDIRECT_URI`：飞书登录回跳地址，必须和飞书后台“重定向 URL”完全一致
 - `FEISHU_CHAT_ID`：归还请求共享群 chat_id
 - `FEISHU_BITABLE_APP_TOKEN`
 - `FEISHU_BOARDS_TABLE_ID`

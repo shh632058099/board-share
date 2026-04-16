@@ -42,6 +42,7 @@ export function loadConfig(env = process.env, cwd = process.cwd()) {
     feishu: {
       appId: env.FEISHU_APP_ID || '',
       appSecret: env.FEISHU_APP_SECRET || '',
+      redirectUri: env.FEISHU_REDIRECT_URI || '',
       chatId: env.FEISHU_CHAT_ID || '',
       bitableAppToken: env.FEISHU_BITABLE_APP_TOKEN || '',
       tables: {
