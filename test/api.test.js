@@ -1,0 +1,151 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { loadConfig } from '../src/config.js';
+import { createApp } from '../src/server.js';
+import { LocalStore } from '../src/store/localStore.js';
+
+async function startTestServer() {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-'));
+  const config = loadConfig(
+    {
+      NODE_ENV: 'test',
+      DEV_AUTH: 'true',
+      ALLOW_TIME_OVERRIDE: 'true',
+      DATA_FILE: path.join(tmpDir, 'state.json'),
+    },
+    process.cwd(),
+  );
+  const store = new LocalStore(config.dataFile);
+  const notifier = { sendReturnRequest: async () => 'sent' };
+  const server = createApp({ config, store, notifier });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  return { baseUrl, server, tmpDir };
+}
+
+async function request(baseUrl, pathName, { method = 'GET', user, body, now } = {}) {
+  const activeUser = user || { id: 'ou_admin', name: 'Admin' };
+  const response = await fetch(`${baseUrl}${pathName}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      'x-user-id': activeUser.id,
+      'x-user-name': activeUser.name,
+      ...(now ? { 'x-now': now } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const payload = await response.json();
+  return { status: response.status, payload };
+}
+
+test('enforces admin board management and reservation conflict rules', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const normalCreate = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    body: { boardNo: 'B-001', type: 'EVB' },
+  });
+  assert.equal(normalCreate.status, 403);
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: {
+      boardNo: 'B-001',
+      type: 'EVB',
+      version: 'v1',
+      systemVersion: '2026.04',
+      subcards: [{ name: 'sensor', model: 'S1', remark: 'demo' }],
+    },
+  });
+  assert.equal(created.status, 201);
+  const boardId = created.payload.board.id;
+
+  const reserved = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T10:00:00+08:00',
+    body: { boardId, durationHours: 2, purpose: 'bring-up' },
+  });
+  assert.equal(reserved.status, 201);
+  assert.equal(reserved.payload.reservation.boardId, boardId);
+
+  const duplicated = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:10:00+08:00',
+    body: { boardId, durationHours: 1 },
+  });
+  assert.equal(duplicated.status, 409);
+
+  const boards = await request(baseUrl, '/api/boards', {
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:30:00+08:00',
+  });
+  assert.equal(boards.status, 200);
+  assert.equal(boards.payload.boards[0].status, 'in_use');
+});
+
+test('allows return requests only after overdue and restores board after return', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: { boardNo: 'B-002', type: 'EVB' },
+  });
+  const boardId = created.payload.board.id;
+
+  const reserved = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T20:30:00+08:00',
+    body: { boardId, durationHours: 1 },
+  });
+  const reservationId = reserved.payload.reservation.id;
+  assert.match(reserved.payload.reservation.plannedEndAt, /^2026-04-17T01:30:00.000Z$/);
+
+  const earlyRequest = await request(baseUrl, `/api/reservations/${reservationId}/request-return`, {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-17T09:20:00+08:00',
+    body: {},
+  });
+  assert.equal(earlyRequest.status, 409);
+
+  const overdueRequest = await request(baseUrl, `/api/reservations/${reservationId}/request-return`, {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-17T09:31:00+08:00',
+    body: {},
+  });
+  assert.equal(overdueRequest.status, 201);
+  assert.equal(overdueRequest.payload.returnRequest.notificationStatus, 'sent');
+
+  const returned = await request(baseUrl, `/api/reservations/${reservationId}/return`, {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-17T09:40:00+08:00',
+    body: {},
+  });
+  assert.equal(returned.status, 200);
+  assert.equal(returned.payload.reservation.status, 'returned');
+
+  const boards = await request(baseUrl, '/api/boards', {
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-17T09:41:00+08:00',
+  });
+  assert.equal(boards.payload.boards[0].status, 'available');
+});

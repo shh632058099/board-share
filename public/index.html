@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>单板共享</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-image" src="/assets/board.png" alt="" />
+        <div>
+          <h1>单板共享</h1>
+          <p id="userSummary">正在读取身份</p>
+        </div>
+      </div>
+      <form id="identityForm" class="identity-form" autocomplete="off">
+        <label>
+          用户 ID
+          <input id="userIdInput" name="userId" required />
+        </label>
+        <label>
+          姓名
+          <input id="userNameInput" name="userName" required />
+        </label>
+        <button type="submit">切换身份</button>
+      </form>
+    </header>
+
+    <nav class="tabs" aria-label="主导航">
+      <button class="tab is-active" data-tab="boards" type="button">单板列表</button>
+      <button class="tab" data-tab="mine" type="button">我的使用</button>
+      <button class="tab admin-only" data-tab="admin" type="button" hidden>管理</button>
+      <button id="refreshButton" class="ghost-button" type="button">刷新</button>
+    </nav>
+
+    <main>
+      <section id="boardsView" class="view">
+        <div class="section-head">
+          <div>
+            <h2>单板列表</h2>
+            <p>申请、归还或在超时后请求归还。</p>
+          </div>
+          <select id="statusFilter" aria-label="状态筛选">
+            <option value="all">全部状态</option>
+            <option value="available">可申请</option>
+            <option value="in_use">使用中</option>
+            <option value="overdue">已超时</option>
+          </select>
+        </div>
+        <div id="boardList" class="board-grid"></div>
+      </section>
+
+      <section id="mineView" class="view" hidden>
+        <div class="section-head">
+          <div>
+            <h2>我的使用</h2>
+            <p>当前占用和历史申请记录。</p>
+          </div>
+        </div>
+        <div id="myCurrent" class="stack"></div>
+        <h3 class="subhead">历史记录</h3>
+        <div id="myHistory" class="stack"></div>
+      </section>
+
+      <section id="adminView" class="view" hidden>
+        <div class="section-head">
+          <div>
+            <h2>管理</h2>
+            <p>新增、编辑和软删除空闲单板。</p>
+          </div>
+        </div>
+        <form id="boardForm" class="board-form" autocomplete="off">
+          <input type="hidden" id="editingBoardId" />
+          <label>
+            单板编号
+            <input id="boardNoInput" required />
+          </label>
+          <label>
+            类型
+            <input id="typeInput" />
+          </label>
+          <label>
+            版本号
+            <input id="versionInput" />
+          </label>
+          <label>
+            系统版本号
+            <input id="systemVersionInput" />
+          </label>
+          <label class="wide">
+            子卡列表
+            <textarea id="subcardsInput" rows="4" placeholder="每行：名称 | 型号 | 备注"></textarea>
+          </label>
+          <label class="wide">
+            备注
+            <textarea id="remarkInput" rows="3"></textarea>
+          </label>
+          <div class="form-actions wide">
+            <button type="submit">保存单板</button>
+            <button id="cancelEditButton" class="ghost-button" type="button">取消编辑</button>
+          </div>
+        </form>
+        <div id="adminBoardList" class="admin-table"></div>
+      </section>
+    </main>
+
+    <dialog id="applyDialog" class="dialog">
+      <form id="applyForm" method="dialog">
+        <input type="hidden" id="applyBoardId" />
+        <h2 id="applyTitle">申请单板</h2>
+        <label>
+          申请时长（小时）
+          <input id="durationInput" type="number" min="0.5" step="0.5" value="1" required />
+        </label>
+        <label>
+          用途备注
+          <textarea id="purposeInput" rows="4"></textarea>
+        </label>
+        <div class="form-actions">
+          <button type="submit">确认申请</button>
+          <button id="closeApplyButton" class="ghost-button" type="button">取消</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
