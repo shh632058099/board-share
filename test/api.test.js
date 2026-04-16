@@ -149,3 +149,64 @@ test('allows return requests only after overdue and restores board after return'
   });
   assert.equal(boards.payload.boards[0].status, 'available');
 });
+
+
+test('creates a Feishu login session and authenticates API calls by cookie', async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-'));
+  const config = loadConfig(
+    {
+      NODE_ENV: 'test',
+      DEV_AUTH: 'false',
+      SESSION_COOKIE_SECURE: 'false',
+      FEISHU_APP_ID: 'cli_test',
+      FEISHU_APP_SECRET: 'secret_test',
+      DATA_FILE: path.join(tmpDir, 'state.json'),
+    },
+    process.cwd(),
+  );
+  const store = new LocalStore(config.dataFile);
+  const feishuClient = {
+    enabled: true,
+    getUserByAuthCode: async (code) => {
+      assert.equal(code, 'login-code');
+      return {
+        id: 'ou_user_session',
+        name: 'Session User',
+        openId: 'ou_user_session',
+        userId: 'user_session',
+        unionId: 'on_session',
+        avatarUrl: '',
+      };
+    },
+  };
+  const server = createApp({ config, store, feishuClient });
+  await new Promise((resolve) => server.listen(0, resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const anonymous = await fetch(`${baseUrl}/api/me`);
+  assert.equal(anonymous.status, 401);
+
+  const login = await fetch(`${baseUrl}/api/auth/feishu`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: 'login-code', state: 'state-1' }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie');
+  assert.match(cookie, /sb_session=/);
+  assert.doesNotMatch(cookie, /Secure/);
+
+  const me = await fetch(`${baseUrl}/api/me`, {
+    headers: { cookie },
+  });
+  assert.equal(me.status, 200);
+  const payload = await me.json();
+  assert.equal(payload.user.id, 'ou_user_session');
+  assert.equal(payload.user.name, 'Session User');
+});

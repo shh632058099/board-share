@@ -72,9 +72,10 @@ export function publicBoard(board, state, now = new Date()) {
 }
 
 export function isAdminUser(user, state, config) {
-  if (!user?.id) return false;
-  if (config.adminUserIds.includes(user.id)) return true;
-  return state.admins.some((admin) => admin.enabled && admin.userId === user.id);
+  const userIds = [user?.id, user?.openId, user?.userId, user?.unionId].filter(Boolean);
+  if (!userIds.length) return false;
+  if (config.adminUserIds.some((adminId) => userIds.includes(adminId))) return true;
+  return state.admins.some((admin) => admin.enabled && userIds.includes(admin.userId));
 }
 
 export function requireAdmin(user, state, config) {

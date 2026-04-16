@@ -4,19 +4,23 @@ export class FeishuClient {
     this.appSecret = appSecret;
     this.tenantToken = null;
     this.tenantTokenExpiresAt = 0;
+    this.appToken = null;
+    this.appTokenExpiresAt = 0;
   }
 
   get enabled() {
     return Boolean(this.appId && this.appSecret);
   }
 
-  async request(path, { method = 'GET', headers = {}, body, tenantToken = true } = {}) {
+  async request(path, { method = 'GET', headers = {}, body, tenantToken = true, bearerToken = '' } = {}) {
     const finalHeaders = {
       'content-type': 'application/json; charset=utf-8',
       ...headers,
     };
 
-    if (tenantToken) {
+    if (bearerToken) {
+      finalHeaders.authorization = `Bearer ${bearerToken}`;
+    } else if (tenantToken) {
       finalHeaders.authorization = `Bearer ${await this.getTenantAccessToken()}`;
     }
 
@@ -58,22 +62,60 @@ export class FeishuClient {
     return this.tenantToken;
   }
 
-  async getUserByAuthCode(code) {
-    const payload = await this.request('/open-apis/authen/v1/access_token', {
+  async getAppAccessToken() {
+    if (!this.enabled) {
+      throw new Error('FEISHU_APP_ID and FEISHU_APP_SECRET are required');
+    }
+
+    const now = Date.now();
+    if (this.appToken && this.appTokenExpiresAt - 60_000 > now) {
+      return this.appToken;
+    }
+
+    const payload = await this.request('/open-apis/auth/v3/app_access_token/internal', {
       method: 'POST',
+      tenantToken: false,
+      body: {
+        app_id: this.appId,
+        app_secret: this.appSecret,
+      },
+    });
+
+    this.appToken = payload.app_access_token;
+    this.appTokenExpiresAt = now + Number(payload.expire || 7200) * 1000;
+    return this.appToken;
+  }
+
+  async getUserByAuthCode(code) {
+    const appAccessToken = await this.getAppAccessToken();
+    const tokenPayload = await this.request('/open-apis/authen/v1/access_token', {
+      method: 'POST',
+      tenantToken: false,
+      bearerToken: appAccessToken,
       body: {
         grant_type: 'authorization_code',
         code,
       },
     });
 
-    const data = payload.data || {};
+    const accessToken = tokenPayload.data?.access_token || tokenPayload.data?.user_access_token;
+    if (!accessToken) {
+      throw new Error('Feishu API failed: user_access_token is missing');
+    }
+
+    const userPayload = await this.request('/open-apis/authen/v1/user_info', {
+      tenantToken: false,
+      bearerToken: accessToken,
+    });
+
+    const data = userPayload.data || tokenPayload.data || {};
     return {
       id: data.open_id || data.user_id || data.union_id,
       name: data.name || data.en_name || data.user_id || data.open_id || '飞书用户',
-      openId: data.open_id,
-      userId: data.user_id,
-      avatarUrl: data.avatar_url || '',
+      openId: data.open_id || '',
+      userId: data.user_id || '',
+      unionId: data.union_id || '',
+      avatarUrl: data.avatar_url || data.avatar_thumb || '',
     };
   }
 

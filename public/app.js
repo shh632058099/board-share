@@ -3,7 +3,10 @@ const state = {
   boards: [],
   my: { current: [], history: [] },
   tab: 'boards',
+  authConfig: null,
 };
+
+let loginRedirecting = false;
 
 const els = {
   userSummary: document.querySelector('#userSummary'),
@@ -56,26 +59,46 @@ function currentIdentity() {
 }
 
 function requestHeaders(hasJsonBody = false) {
-  const identity = currentIdentity();
-  return {
+  const headers = {
     ...(hasJsonBody ? { 'content-type': 'application/json' } : {}),
-    'x-user-id': identity.id,
-    'x-user-name': encodeURIComponent(identity.name),
   };
+
+  if (state.authConfig?.devAuth !== false) {
+    const identity = currentIdentity();
+    headers['x-user-id'] = identity.id;
+    headers['x-user-name'] = encodeURIComponent(identity.name);
+  }
+
+  return headers;
+}
+
+class ApiError extends Error {
+  constructor(message, status, code) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
 }
 
 async function api(path, options = {}) {
-  const hasBody = options.body !== undefined;
+  const { skipLoginRedirect = false, ...fetchOptions } = options;
+  const hasBody = fetchOptions.body !== undefined;
   const response = await fetch(path, {
-    ...options,
+    ...fetchOptions,
+    credentials: 'same-origin',
     headers: {
       ...requestHeaders(hasBody),
-      ...(options.headers || {}),
+      ...(fetchOptions.headers || {}),
     },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error?.message || '请求失败');
+    const error = new ApiError(payload.error?.message || '请求失败', response.status, payload.error?.code);
+    if (error.status === 401 && state.authConfig?.devAuth === false && !skipLoginRedirect) {
+      redirectToFeishuLogin();
+    }
+    throw error;
   }
   return payload;
 }
@@ -106,6 +129,67 @@ function showToast(message) {
   showToast.timer = window.setTimeout(() => {
     els.toast.hidden = true;
   }, 2600);
+}
+
+function currentPageRedirectUri() {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function randomState() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function redirectToFeishuLogin() {
+  if (state.authConfig?.devAuth !== false || loginRedirecting) return;
+  loginRedirecting = true;
+
+  if (!state.authConfig?.feishuAuthEnabled || !state.authConfig?.feishuAppId) {
+    els.userSummary.textContent = '飞书登录未配置';
+    showToast('未配置 FEISHU_APP_ID 或 FEISHU_APP_SECRET');
+    loginRedirecting = false;
+    return;
+  }
+
+  const loginState = randomState();
+  sessionStorage.setItem('share-board.feishuState', loginState);
+
+  const url = new URL(state.authConfig.loginUrl || 'https://open.feishu.cn/open-apis/authen/v1/index');
+  url.searchParams.set('app_id', state.authConfig.feishuAppId);
+  url.searchParams.set('redirect_uri', currentPageRedirectUri());
+  url.searchParams.set('state', loginState);
+
+  els.userSummary.textContent = '正在进入飞书免登';
+  window.location.href = url.toString();
+}
+
+async function loadAuthConfig() {
+  const payload = await api('/api/auth/config', { skipLoginRedirect: true });
+  state.authConfig = payload.auth;
+  els.identityForm.hidden = state.authConfig?.devAuth === false;
+}
+
+async function completeFeishuLoginIfNeeded() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (!code) return;
+
+  const returnedState = params.get('state') || '';
+  const expectedState = sessionStorage.getItem('share-board.feishuState') || '';
+  if (expectedState && returnedState !== expectedState) {
+    throw new Error('飞书登录 state 校验失败');
+  }
+
+  await api('/api/auth/feishu', {
+    method: 'POST',
+    body: JSON.stringify({ code, state: returnedState, redirectUri: currentPageRedirectUri() }),
+    skipLoginRedirect: true,
+  });
+
+  sessionStorage.removeItem('share-board.feishuState');
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
 }
 
 function subcardsText(subcards) {
@@ -252,6 +336,7 @@ function renderShell() {
   els.userSummary.textContent = state.user
     ? `${state.user.name} (${state.user.id})${state.user.isAdmin ? '，管理员' : ''}`
     : '未登录';
+  els.identityForm.hidden = state.authConfig?.devAuth === false;
   document.querySelectorAll('.admin-only').forEach((item) => {
     item.hidden = !state.user?.isAdmin;
   });
@@ -355,6 +440,10 @@ async function handleAction(target) {
 
 els.identityForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (state.authConfig?.devAuth === false) {
+    showToast('正式环境使用飞书身份登录');
+    return;
+  }
   localStorage.setItem('share-board.userId', els.userIdInput.value.trim());
   localStorage.setItem('share-board.userName', els.userNameInput.value.trim());
   await loadAll().catch((error) => showToast(error.message));
@@ -435,7 +524,23 @@ document.addEventListener('click', (event) => {
   handleAction(target).catch((error) => showToast(error.message));
 });
 
+async function bootstrap() {
+  try {
+    await loadAuthConfig();
+    await completeFeishuLoginIfNeeded();
+    await loadAll();
+  } catch (error) {
+    if (error.status === 401 && state.authConfig?.devAuth === false) {
+      redirectToFeishuLogin();
+      return;
+    }
+    state.user = null;
+    renderShell();
+    showToast(error.message);
+  }
+}
+
 const identity = currentIdentity();
 els.userIdInput.value = identity.id;
 els.userNameInput.value = identity.name;
-loadAll().catch((error) => showToast(error.message));
+bootstrap();

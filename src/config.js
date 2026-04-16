@@ -23,14 +23,22 @@ export function loadConfig(env = process.env, cwd = process.cwd()) {
       env.FEISHU_ADMINS_TABLE_ID,
   );
 
+  const devAuth = boolFromEnv(env.DEV_AUTH, true);
+
   return {
     port: Number(env.PORT || 3000),
     dataFile: env.DATA_FILE || path.join(cwd, 'data', 'share-board.json'),
     publicDir: env.PUBLIC_DIR || path.join(cwd, 'public'),
-    devAuth: boolFromEnv(env.DEV_AUTH, true),
+    devAuth,
     allowTimeOverride: boolFromEnv(env.ALLOW_TIME_OVERRIDE, env.NODE_ENV === 'test'),
     adminUserIds: splitCsv(env.ADMIN_USER_IDS),
     storage: env.STORAGE || (feishuBitableConfigured ? 'feishu' : 'local'),
+    session: {
+      cookieName: env.SESSION_COOKIE_NAME || 'sb_session',
+      maxAgeSeconds: Number(env.SESSION_MAX_AGE_SECONDS || 7 * 24 * 60 * 60),
+      cookieSecure: boolFromEnv(env.SESSION_COOKIE_SECURE, !devAuth),
+      cookieSameSite: env.SESSION_COOKIE_SAMESITE || 'Lax',
+    },
     feishu: {
       appId: env.FEISHU_APP_ID || '',
       appSecret: env.FEISHU_APP_SECRET || '',

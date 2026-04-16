@@ -32,6 +32,10 @@ npm test
 - `DEV_AUTH`：是否允许本地请求头身份，默认 `true`
 - `ADMIN_USER_IDS`：管理员飞书用户 ID，英文逗号分隔
 - `STORAGE`：`local` 或 `feishu`，默认 `local`
+- `SESSION_COOKIE_NAME`：登录态 cookie 名称，默认 `sb_session`
+- `SESSION_MAX_AGE_SECONDS`：登录态有效期，默认 7 天
+- `SESSION_COOKIE_SECURE`：是否只通过 HTTPS 写 cookie；飞书正式环境建议 `true`
+- `SESSION_COOKIE_SAMESITE`：cookie SameSite 策略，默认 `Lax`；若飞书内嵌环境不回传 cookie，可设为 `None` 并保持 HTTPS
 
 飞书配置：
 

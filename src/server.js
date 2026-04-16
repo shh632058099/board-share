@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { authenticate } from './auth.js';
+import { attachPermissions, authenticate } from './auth.js';
 import { loadConfig } from './config.js';
 import {
   createBoard,
@@ -17,6 +17,12 @@ import {
 import { HttpError, badRequest, notFound } from './errors.js';
 import { FeishuClient } from './feishuClient.js';
 import { createNotifier } from './notifier.js';
+import {
+  MemorySessionStore,
+  getSessionId,
+  serializeExpiredSessionCookie,
+  serializeSessionCookie,
+} from './session.js';
 import { createStore } from './store/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,10 +39,11 @@ const CONTENT_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, headers = {}) {
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
+    ...headers,
   });
   res.end(JSON.stringify(payload));
 }
@@ -103,8 +110,62 @@ function reservationActionFromPath(pathname) {
   return { id: decodeURIComponent(match[1]), action: match[2] };
 }
 
+async function handleAuthApi(req, res, deps) {
+  const { config, store, feishuClient, sessionStore } = deps;
+  const url = new URL(req.url, 'http://localhost');
+  const pathname = url.pathname;
+
+  if (req.method === 'GET' && pathname === '/api/auth/config') {
+    sendJson(res, 200, {
+      auth: {
+        devAuth: config.devAuth,
+        feishuAuthEnabled: feishuClient.enabled,
+        feishuAppId: config.feishu.appId,
+        loginUrl: 'https://open.feishu.cn/open-apis/authen/v1/index',
+      },
+    });
+    return true;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/auth/feishu') {
+    if (!feishuClient.enabled) {
+      throw badRequest('未配置 FEISHU_APP_ID 或 FEISHU_APP_SECRET');
+    }
+
+    const body = await readJsonBody(req);
+    const code = String(body.code || '').trim();
+    if (!code) {
+      throw badRequest('缺少飞书登录 code');
+    }
+
+    const feishuUser = await feishuClient.getUserByAuthCode(code);
+    if (!feishuUser?.id) {
+      throw badRequest('飞书用户身份为空');
+    }
+
+    const session = sessionStore.create(feishuUser);
+    const state = await store.read();
+    const user = attachPermissions(feishuUser, state, config);
+    sendJson(
+      res,
+      200,
+      { user },
+      { 'set-cookie': serializeSessionCookie(session.id, config, { maxAgeSeconds: session.maxAgeSeconds }) },
+    );
+    return true;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/logout') {
+    sessionStore.destroy(getSessionId(req, config));
+    sendJson(res, 200, { ok: true }, { 'set-cookie': serializeExpiredSessionCookie(config) });
+    return true;
+  }
+
+  return false;
+}
+
 async function handleApi(req, res, deps) {
-  const { config, store, notifier, feishuClient } = deps;
+  const { config, store, notifier, sessionStore } = deps;
   const url = new URL(req.url, 'http://localhost');
   const pathname = url.pathname;
 
@@ -118,7 +179,11 @@ async function handleApi(req, res, deps) {
     return;
   }
 
-  const user = await authenticate(req, { config, store, feishuClient });
+  if (await handleAuthApi(req, res, deps)) {
+    return;
+  }
+
+  const user = await authenticate(req, { config, store, sessionStore });
   const now = getRequestNow(req, config);
 
   if (req.method === 'GET' && pathname === '/api/me') {
@@ -219,10 +284,11 @@ async function serveStatic(req, res, publicDir) {
   }
 }
 
-export function createApp({ config = loadConfig(), store, feishuClient, notifier } = {}) {
+export function createApp({ config = loadConfig(), store, feishuClient, notifier, sessionStore } = {}) {
   const client = feishuClient || new FeishuClient(config.feishu);
   const finalStore = store || createStore(config, client);
   const finalNotifier = notifier || createNotifier(config, client);
+  const finalSessionStore = sessionStore || new MemorySessionStore(config.session);
 
   return http.createServer(async (req, res) => {
     try {
@@ -232,6 +298,7 @@ export function createApp({ config = loadConfig(), store, feishuClient, notifier
           store: finalStore,
           notifier: finalNotifier,
           feishuClient: client,
+          sessionStore: finalSessionStore,
         });
       } else {
         await serveStatic(req, res, config.publicDir);
