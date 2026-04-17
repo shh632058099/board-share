@@ -30,6 +30,7 @@
 
     <nav class="tabs" aria-label="主导航">
       <button class="tab is-active" data-tab="boards" type="button">单板列表</button>
+      <button class="tab" data-tab="timeline" type="button">占用时间线</button>
       <button class="tab" data-tab="mine" type="button">我的使用</button>
       <button class="tab admin-only" data-tab="admin" type="button" hidden>管理</button>
       <button id="refreshButton" class="ghost-button" type="button">刷新</button>
@@ -52,6 +53,32 @@
         <div id="boardList" class="board-grid"></div>
       </section>
 
+      <section id="timelineView" class="view" hidden>
+        <div class="section-head">
+          <div>
+            <h2>占用时间线</h2>
+            <p>查看所有单板的预约和占用时间段。</p>
+          </div>
+          <form id="timelineForm" class="timeline-form" autocomplete="off">
+            <label>
+              开始
+              <input id="timelineFromInput" type="datetime-local" />
+            </label>
+            <label>
+              结束
+              <input id="timelineToInput" type="datetime-local" />
+            </label>
+            <button type="submit">查看</button>
+          </form>
+        </div>
+        <div class="timeline-legend" aria-label="图例">
+          <span><i class="legend-icon reserved"></i>预约</span>
+          <span><i class="legend-icon active"></i>占用</span>
+          <span><i class="legend-icon overdue"></i>超时</span>
+        </div>
+        <div id="timelineBoard" class="timeline-board"></div>
+      </section>
+
       <section id="mineView" class="view" hidden>
         <div class="section-head">
           <div>
@@ -60,6 +87,8 @@
           </div>
         </div>
         <div id="myCurrent" class="stack"></div>
+        <h3 class="subhead">我的预约</h3>
+        <div id="myUpcoming" class="stack"></div>
         <h3 class="subhead">历史记录</h3>
         <div id="myHistory" class="stack"></div>
       </section>
@@ -110,6 +139,10 @@
       <form id="applyForm" method="dialog">
         <input type="hidden" id="applyBoardId" />
         <h2 id="applyTitle">申请单板</h2>
+        <label>
+          开始时间
+          <input id="startAtInput" type="datetime-local" required />
+        </label>
         <label>
           申请时长（小时）
           <input id="durationInput" type="number" min="0.5" step="0.5" value="1" required />

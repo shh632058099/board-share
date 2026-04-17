@@ -1,7 +1,8 @@
 const state = {
   user: null,
   boards: [],
-  my: { current: [], history: [] },
+  timeline: null,
+  my: { current: [], upcoming: [], history: [] },
   tab: 'boards',
   authConfig: null,
 };
@@ -16,11 +17,17 @@ const els = {
   tabs: document.querySelectorAll('.tab'),
   refreshButton: document.querySelector('#refreshButton'),
   boardsView: document.querySelector('#boardsView'),
+  timelineView: document.querySelector('#timelineView'),
   mineView: document.querySelector('#mineView'),
   adminView: document.querySelector('#adminView'),
   boardList: document.querySelector('#boardList'),
   statusFilter: document.querySelector('#statusFilter'),
+  timelineForm: document.querySelector('#timelineForm'),
+  timelineFromInput: document.querySelector('#timelineFromInput'),
+  timelineToInput: document.querySelector('#timelineToInput'),
+  timelineBoard: document.querySelector('#timelineBoard'),
   myCurrent: document.querySelector('#myCurrent'),
+  myUpcoming: document.querySelector('#myUpcoming'),
   myHistory: document.querySelector('#myHistory'),
   boardForm: document.querySelector('#boardForm'),
   editingBoardId: document.querySelector('#editingBoardId'),
@@ -36,6 +43,7 @@ const els = {
   applyForm: document.querySelector('#applyForm'),
   applyBoardId: document.querySelector('#applyBoardId'),
   applyTitle: document.querySelector('#applyTitle'),
+  startAtInput: document.querySelector('#startAtInput'),
   durationInput: document.querySelector('#durationInput'),
   purposeInput: document.querySelector('#purposeInput'),
   closeApplyButton: document.querySelector('#closeApplyButton'),
@@ -49,6 +57,26 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function pad(value) {
+  return String(value).padStart(2, '0');
+}
+
+function toDateTimeLocalValue(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`;
+}
+
+function roundToNextHalfHour(value = new Date()) {
+  const date = new Date(value.getTime());
+  date.setSeconds(0, 0);
+  const minutes = date.getMinutes();
+  const addMinutes = minutes === 0 || minutes === 30 ? 0 : minutes < 30 ? 30 - minutes : 60 - minutes;
+  date.setMinutes(minutes + addMinutes);
+  return date;
 }
 
 function currentIdentity() {
@@ -113,11 +141,22 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
+function formatAxisDate(value) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+  }).format(new Date(value));
+}
+
 function statusText(status) {
   return {
     available: '可申请',
     in_use: '使用中',
     overdue: '已超时',
+    reserved: '已预约',
+    active: '占用中',
+    returned: '已归还',
     deleted: '已删除',
   }[status] || status;
 }
@@ -206,9 +245,8 @@ function boardActions(board) {
   const canRequestReturn = board.status === 'overdue' && board.currentReservationId && !isMine;
   const actions = [];
 
-  if (board.status === 'available') {
-    actions.push(`<button type="button" data-action="apply" data-board-id="${escapeHtml(board.id)}">申请</button>`);
-  }
+  actions.push(`<button type="button" data-action="apply" data-board-id="${escapeHtml(board.id)}">预约</button>`);
+
   if (canReturn) {
     actions.push(
       `<button type="button" class="ghost-button" data-action="return" data-reservation-id="${escapeHtml(
@@ -250,6 +288,7 @@ function renderBoards() {
           <span>子卡：${escapeHtml(subcardsText(board.subcards))}</span>
           <span>当前使用人：${escapeHtml(board.currentUserName || '无')}</span>
           <span>预计归还：${escapeHtml(formatDate(board.currentReservation?.plannedEndAt))}</span>
+          <span>下次预约：${escapeHtml(formatDate(board.nextReservation?.startedAt))}</span>
           <span>备注：${escapeHtml(board.remark || '无')}</span>
         </div>
         <div class="card-actions">${boardActions(board)}</div>
@@ -260,7 +299,7 @@ function renderBoards() {
 
 function reservationRow(reservation, allowReturn) {
   const action =
-    allowReturn && reservation.status === 'active'
+    allowReturn && ['active', 'overdue'].includes(reservation.status)
       ? `<button type="button" class="ghost-button" data-action="return" data-reservation-id="${escapeHtml(
           reservation.id,
         )}">归还</button>`
@@ -268,6 +307,7 @@ function reservationRow(reservation, allowReturn) {
   return `<article class="reservation-row">
     <div class="meta">
       <strong>${escapeHtml(reservation.boardNo || reservation.board?.boardNo || '未知单板')}</strong>
+      <span>状态：${escapeHtml(statusText(reservation.status))}</span>
       <span>开始：${escapeHtml(formatDate(reservation.startedAt))}</span>
       <span>计划归还：${escapeHtml(formatDate(reservation.plannedEndAt))}</span>
       <span>实际归还：${escapeHtml(formatDate(reservation.returnedAt))}</span>
@@ -281,9 +321,139 @@ function renderMine() {
   els.myCurrent.innerHTML = state.my.current.length
     ? state.my.current.map((reservation) => reservationRow(reservation, true)).join('')
     : '<div class="empty">当前没有占用的单板</div>';
+  els.myUpcoming.innerHTML = state.my.upcoming.length
+    ? state.my.upcoming.map((reservation) => reservationRow(reservation, false)).join('')
+    : '<div class="empty">暂无未来预约</div>';
   els.myHistory.innerHTML = state.my.history.length
     ? state.my.history.map((reservation) => reservationRow(reservation, false)).join('')
     : '<div class="empty">暂无历史申请</div>';
+}
+
+function timelineBlockClass(status) {
+  if (status === 'overdue') return 'overdue';
+  if (status === 'reserved') return 'reserved';
+  return 'active';
+}
+
+function percentInRange(value, from, totalMs) {
+  return Math.max(0, Math.min(100, ((value - from.getTime()) / totalMs) * 100));
+}
+
+function freeSlotsForReservations(reservations, from, to) {
+  const busy = reservations
+    .map((reservation) => ({
+      start: Math.max(new Date(reservation.startedAt).getTime(), from.getTime()),
+      end: Math.min(new Date(reservation.plannedEndAt).getTime(), to.getTime()),
+    }))
+    .filter((slot) => slot.end > slot.start)
+    .sort((a, b) => a.start - b.start);
+
+  const slots = [];
+  let cursor = from.getTime();
+  for (const item of busy) {
+    if (item.start > cursor) {
+      slots.push({ start: cursor, end: item.start });
+    }
+    cursor = Math.max(cursor, item.end);
+  }
+  if (cursor < to.getTime()) {
+    slots.push({ start: cursor, end: to.getTime() });
+  }
+  return slots;
+}
+
+function normalizeBusinessStartValue(value) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  const start = new Date(date.getTime());
+  start.setHours(9, 0, 0, 0);
+  const end = new Date(date.getTime());
+  end.setHours(21, 0, 0, 0);
+
+  if (date < start) return start;
+  if (date >= end) {
+    start.setDate(start.getDate() + 1);
+    return start;
+  }
+  return date;
+}
+
+function usableFreeSlotStart(slot) {
+  const nextUsableStart = roundToNextHalfHour(new Date()).getTime();
+  return normalizeBusinessStartValue(new Date(Math.max(slot.start, nextUsableStart))).getTime();
+}
+
+function renderFreeSlot(board, slot, from, totalMs) {
+  const clickStart = usableFreeSlotStart(slot);
+  if (clickStart >= slot.end) return '';
+
+  const left = percentInRange(slot.start, from, totalMs);
+  const width = Math.max(4, ((slot.end - slot.start) / totalMs) * 100);
+  const startIso = new Date(clickStart).toISOString();
+  return `<button type="button" class="timeline-free-slot" style="left:${left}%;width:${width}%" data-action="apply" data-board-id="${escapeHtml(
+    board.id,
+  )}" data-start-at="${escapeHtml(startIso)}" title="从 ${escapeHtml(formatDate(clickStart))} 开始预约">
+    <span>预约</span>
+  </button>`;
+}
+
+function renderTimeline() {
+  const timeline = state.timeline;
+  if (!timeline) {
+    els.timelineBoard.innerHTML = '<div class="empty">正在加载时间线</div>';
+    return;
+  }
+
+  const from = new Date(timeline.from);
+  const to = new Date(timeline.to);
+  const totalMs = to.getTime() - from.getTime();
+  const axis = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(from.getTime() + (totalMs * index) / 5);
+    return `<span>${escapeHtml(formatAxisDate(date))}</span>`;
+  }).join('');
+
+  const rows = timeline.boards
+    .map(({ board, reservations }) => {
+      const freeSlots = freeSlotsForReservations(reservations, from, to);
+      const freeSlotBlocks = freeSlots.map((slot) => renderFreeSlot(board, slot, from, totalMs)).join('');
+      const reservationBlocks = reservations
+        .map((reservation) => {
+          const start = Math.max(new Date(reservation.startedAt).getTime(), from.getTime());
+          const end = Math.min(new Date(reservation.plannedEndAt).getTime(), to.getTime());
+          const left = percentInRange(start, from, totalMs);
+          const width = Math.max(4, ((end - start) / totalMs) * 100);
+          return `<div class="timeline-block ${timelineBlockClass(reservation.status)}" style="left:${left}%;width:${width}%" title="${escapeHtml(
+            `${reservation.userName} ${formatDate(reservation.startedAt)} - ${formatDate(reservation.plannedEndAt)}`,
+          )}">
+            <strong>${escapeHtml(reservation.userName || '未知用户')}</strong>
+            <span>${escapeHtml(formatDate(reservation.startedAt))} - ${escapeHtml(formatDate(reservation.plannedEndAt))}</span>
+          </div>`;
+        })
+        .join('');
+      const firstFreeStart = freeSlots.find((slot) => usableFreeSlotStart(slot) < slot.end);
+      const firstStartAt = firstFreeStart
+        ? ` data-start-at="${escapeHtml(new Date(usableFreeSlotStart(firstFreeStart)).toISOString())}"`
+        : '';
+
+      return `<div class="timeline-row">
+        <div class="timeline-label">
+          <strong>${escapeHtml(board.boardNo)}</strong>
+          <p>${escapeHtml(board.type || '未填写类型')}</p>
+        </div>
+        <div class="timeline-canvas">${freeSlotBlocks}${reservationBlocks}</div>
+        <div class="timeline-action">
+          <button type="button" class="ghost-button" data-action="apply" data-board-id="${escapeHtml(board.id)}"${firstStartAt} ${
+            firstStartAt ? '' : 'disabled'
+          }>预约</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  els.timelineBoard.innerHTML = `<div class="timeline-head">
+    <div class="timeline-label">单板</div>
+    <div class="timeline-canvas"><div class="timeline-axis">${axis}</div></div>
+    <div class="timeline-action">操作</div>
+  </div>${rows || '<div class="empty">暂无单板</div>'}`;
 }
 
 function subcardsToTextarea(subcards) {
@@ -324,7 +494,7 @@ function renderAdmin() {
             board.deleted ? 'disabled' : ''
           }>编辑</button>
           <button type="button" class="ghost-button" data-action="delete-board" data-board-id="${escapeHtml(board.id)}" ${
-            board.deleted || board.status !== 'available' ? 'disabled' : ''
+            board.deleted || board.status !== 'available' || board.nextReservation ? 'disabled' : ''
           }>删除</button>
         </div>
       </article>`,
@@ -347,6 +517,7 @@ function renderShell() {
 
   els.tabs.forEach((tab) => tab.classList.toggle('is-active', tab.dataset.tab === state.tab));
   els.boardsView.hidden = state.tab !== 'boards';
+  els.timelineView.hidden = state.tab !== 'timeline';
   els.mineView.hidden = state.tab !== 'mine';
   els.adminView.hidden = state.tab !== 'admin';
 }
@@ -354,8 +525,29 @@ function renderShell() {
 function renderAll() {
   renderShell();
   renderBoards();
+  renderTimeline();
   renderMine();
   renderAdmin();
+}
+
+function initTimelineRange() {
+  if (els.timelineFromInput.value && els.timelineToInput.value) return;
+  const from = roundToNextHalfHour(new Date());
+  const to = new Date(from.getTime() + 3 * 24 * 60 * 60 * 1000);
+  els.timelineFromInput.value = toDateTimeLocalValue(from);
+  els.timelineToInput.value = toDateTimeLocalValue(to);
+}
+
+async function loadTimeline() {
+  initTimelineRange();
+  const query = new URLSearchParams({
+    from: new Date(els.timelineFromInput.value).toISOString(),
+    to: new Date(els.timelineToInput.value).toISOString(),
+  });
+  if (state.user?.isAdmin) {
+    query.set('includeDeleted', 'true');
+  }
+  state.timeline = await api(`/api/timeline?${query}`);
 }
 
 async function loadAll() {
@@ -364,15 +556,17 @@ async function loadAll() {
   const boardsPath = state.user.isAdmin ? '/api/boards?includeDeleted=true' : '/api/boards';
   const [boardsPayload, myPayload] = await Promise.all([api(boardsPath), api('/api/my/reservations')]);
   state.boards = boardsPayload.boards;
-  state.my = myPayload;
+  state.my = { current: [], upcoming: [], history: [], ...myPayload };
+  await loadTimeline();
   renderAll();
 }
 
-function openApplyDialog(boardId) {
-  const board = state.boards.find((item) => item.id === boardId);
+function openApplyDialog(boardId, startAt = undefined) {
+  const board = state.boards.find((item) => item.id === boardId) || state.timeline?.boards.find((item) => item.board.id === boardId)?.board;
   if (!board) return;
   els.applyBoardId.value = board.id;
-  els.applyTitle.textContent = `申请 ${board.boardNo}`;
+  els.applyTitle.textContent = `预约 ${board.boardNo}`;
+  els.startAtInput.value = toDateTimeLocalValue(startAt ? new Date(startAt) : roundToNextHalfHour(new Date()));
   els.durationInput.value = '1';
   els.purposeInput.value = '';
   els.applyDialog.showModal();
@@ -399,7 +593,7 @@ async function handleAction(target) {
   if (!action) return;
 
   if (action === 'apply') {
-    openApplyDialog(target.dataset.boardId);
+    openApplyDialog(target.dataset.boardId, target.dataset.startAt);
     return;
   }
 
@@ -462,6 +656,16 @@ els.refreshButton.addEventListener('click', () => {
 
 els.statusFilter.addEventListener('change', renderBoards);
 
+els.timelineForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await loadTimeline();
+    renderTimeline();
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
 els.applyForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
@@ -469,12 +673,13 @@ els.applyForm.addEventListener('submit', async (event) => {
       method: 'POST',
       body: JSON.stringify({
         boardId: els.applyBoardId.value,
+        startAt: new Date(els.startAtInput.value).toISOString(),
         durationHours: Number(els.durationInput.value),
         purpose: els.purposeInput.value,
       }),
     });
     els.applyDialog.close();
-    showToast('申请成功');
+    showToast('预约成功');
     await loadAll();
   } catch (error) {
     showToast(error.message);
@@ -526,6 +731,7 @@ document.addEventListener('click', (event) => {
 
 async function bootstrap() {
   try {
+    initTimelineRange();
     await loadAuthConfig();
     await completeFeishuLoginIfNeeded();
     await loadAll();

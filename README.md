@@ -2,6 +2,13 @@
 
 基于 `PLAN.md` 的最小可运行实现：静态前端 + Node.js 后端 API。默认使用本地 JSON 文件存储，配置飞书环境变量后可接入飞书鉴权、消息通知和多维表格。
 
+## 功能
+
+- 单板列表展示当前占用、下次预约和超时状态。
+- 占用时间线展示所有单板在指定时间范围内的预约、占用和超时片段，空闲段可直接点击预约。
+- 用户可选择开始时间和申请时长预约占用时间段；从时间线空闲段点击时，开始时间默认填该空闲段的可用起点；同一单板时间段重叠会被拒绝。
+- 使用时长按每天 `09:00-21:00` 累加，非工作时段开始会顺延到下一个 `09:00`。
+
 ## 运行
 
 ```bash
@@ -52,7 +59,7 @@ npm test
 多维表格字段名按当前代码默认值创建即可：
 
 - Boards：`ID`、`单板编号`、`类型`、`版本号`、`系统版本号`、`子卡列表`、`状态`、`当前使用人`、`当前使用人姓名`、`当前申请记录`、`备注`、`是否删除`、`创建时间`、`更新时间`
-- Reservations：`ID`、`单板ID`、`申请人`、`申请人姓名`、`申请时长`、`用途备注`、`开始时间`、`计划结束时间`、`实际归还时间`、`状态`、`归还请求次数`、`创建时间`、`更新时间`
+- Reservations：`ID`、`单板ID`、`申请人`、`申请人姓名`、`申请时长`、`用途备注`、`开始时间`、`计划结束时间`、`实际归还时间`、`状态`、`归还请求次数`、`创建时间`、`更新时间`。`状态` 可为 `reserved`、`active`、`returned`，超时由当前时间派生展示
 - ReturnRequests：`ID`、`申请记录`、`请求人`、`请求人姓名`、`请求时间`、`通知状态`
 - Admins：`管理员飞书用户 ID`、`姓名`、`启用状态`
 
@@ -64,10 +71,11 @@ npm test
 
 - `GET /api/me`
 - `GET /api/boards`
+- `GET /api/timeline`：查询所有单板在时间范围内的预约和占用片段，支持 `from`、`to` 参数
 - `POST /api/boards`
 - `PATCH /api/boards/:id`
 - `DELETE /api/boards/:id`
-- `POST /api/reservations`
+- `POST /api/reservations`：申请或预约单板，支持 `boardId`、`startAt`、`durationHours`、`purpose`
 - `POST /api/reservations/:id/return`
 - `POST /api/reservations/:id/request-return`
 - `GET /api/my/reservations`

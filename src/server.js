@@ -10,6 +10,7 @@ import {
   deleteBoard,
   listBoards,
   listMyReservations,
+  listTimeline,
   requestReturn,
   returnReservation,
   updateBoard,
@@ -196,6 +197,22 @@ async function handleApi(req, res, deps) {
     const state = await store.read();
     const includeDeleted = user.isAdmin && url.searchParams.get('includeDeleted') === 'true';
     sendJson(res, 200, { boards: listBoards(state, { includeDeleted, now }) });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/timeline') {
+    const state = await store.read();
+    const includeDeleted = user.isAdmin && url.searchParams.get('includeDeleted') === 'true';
+    sendJson(
+      res,
+      200,
+      listTimeline(state, {
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        includeDeleted,
+        now,
+      }),
+    );
     return;
   }
 

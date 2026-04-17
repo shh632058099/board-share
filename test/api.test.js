@@ -151,6 +151,89 @@ test('allows return requests only after overdue and restores board after return'
 });
 
 
+
+test('supports future reservations, overlap checks, and board timeline', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: { boardNo: 'B-003', type: 'EVB' },
+  });
+  assert.equal(created.status, 201);
+  const boardId = created.payload.board.id;
+
+  const future = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T10:00:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-16T13:00:00+08:00',
+      durationHours: 2,
+      purpose: 'reserved slot',
+    },
+  });
+  assert.equal(future.status, 201);
+  assert.equal(future.payload.reservation.status, 'reserved');
+
+  const boardsBeforeStart = await request(baseUrl, '/api/boards', {
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:30:00+08:00',
+  });
+  assert.equal(boardsBeforeStart.payload.boards[0].status, 'available');
+  assert.equal(boardsBeforeStart.payload.boards[0].nextReservation.id, future.payload.reservation.id);
+
+  const overlap = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:40:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-16T14:00:00+08:00',
+      durationHours: 1,
+    },
+  });
+  assert.equal(overlap.status, 409);
+
+  const adjacent = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:45:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-16T15:00:00+08:00',
+      durationHours: 1,
+    },
+  });
+  assert.equal(adjacent.status, 201);
+
+  const timeline = await request(
+    baseUrl,
+    '/api/timeline?from=2026-04-16T12%3A00%3A00.000%2B08%3A00&to=2026-04-16T17%3A00%3A00.000%2B08%3A00',
+    {
+      user: { id: 'ou_user_2', name: 'User 2' },
+      now: '2026-04-16T10:50:00+08:00',
+    },
+  );
+  assert.equal(timeline.status, 200);
+  assert.equal(timeline.payload.boards[0].reservations.length, 2);
+  assert.deepEqual(
+    timeline.payload.boards[0].reservations.map((reservation) => reservation.status),
+    ['reserved', 'reserved'],
+  );
+
+  const boardsDuring = await request(baseUrl, '/api/boards', {
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T13:30:00+08:00',
+  });
+  assert.equal(boardsDuring.payload.boards[0].status, 'in_use');
+  assert.equal(boardsDuring.payload.boards[0].currentUserName, 'User 1');
+});
+
 test('creates a Feishu login session and authenticates API calls by cookie', async (t) => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-'));
   const config = loadConfig(
