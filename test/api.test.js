@@ -266,6 +266,44 @@ test('accepts timestamp and space separated reservation start formats', async (t
   assert.equal(second.status, 201);
 });
 
+
+test('restores a soft deleted board', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: { boardNo: 'B-005', type: 'EVB' },
+  });
+  const boardId = created.payload.board.id;
+
+  const deleted = await request(baseUrl, `/api/boards/${boardId}`, { method: 'DELETE' });
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.payload.board.status, 'deleted');
+  assert.equal(deleted.payload.board.deleted, true);
+
+  const hidden = await request(baseUrl, '/api/boards', {
+    user: { id: 'ou_user_1', name: 'User 1' },
+  });
+  assert.equal(hidden.payload.boards.length, 0);
+
+  const restored = await request(baseUrl, `/api/boards/${boardId}/restore`, {
+    method: 'POST',
+    body: {},
+  });
+  assert.equal(restored.status, 200);
+  assert.equal(restored.payload.board.status, 'available');
+  assert.equal(restored.payload.board.deleted, false);
+
+  const visible = await request(baseUrl, '/api/boards', {
+    user: { id: 'ou_user_1', name: 'User 1' },
+  });
+  assert.equal(visible.payload.boards.length, 1);
+});
+
 test('creates a Feishu login session and authenticates API calls by cookie', async (t) => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-'));
   const config = loadConfig(

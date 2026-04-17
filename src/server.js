@@ -12,6 +12,7 @@ import {
   listMyReservations,
   listTimeline,
   requestReturn,
+  restoreBoard,
   returnReservation,
   updateBoard,
 } from './domain.js';
@@ -98,6 +99,11 @@ function getRequestNow(req, config) {
     return date;
   }
   return new Date();
+}
+
+function boardRestoreIdFromPath(pathname) {
+  const match = pathname.match(/^\/api\/boards\/([^/]+)\/restore$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function boardIdFromPath(pathname) {
@@ -220,6 +226,13 @@ async function handleApi(req, res, deps) {
     const body = await readJsonBody(req);
     const board = await store.update((state) => createBoard(state, body, user, config, now));
     sendJson(res, 201, { board });
+    return;
+  }
+
+  const restoreBoardId = boardRestoreIdFromPath(pathname);
+  if (restoreBoardId && req.method === 'POST') {
+    const board = await store.update((state) => restoreBoard(state, restoreBoardId, user, config, now));
+    sendJson(res, 200, { board });
     return;
   }
 

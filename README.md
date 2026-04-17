@@ -74,7 +74,8 @@ npm test
 - `GET /api/timeline`：查询所有单板在时间范围内的预约和占用片段，支持 `from`、`to` 参数
 - `POST /api/boards`
 - `PATCH /api/boards/:id`
-- `DELETE /api/boards/:id`
+- `DELETE /api/boards/:id`：软删除单板
+- `POST /api/boards/:id/restore`：管理员恢复软删除单板
 - `POST /api/reservations`：申请或预约单板，支持 `boardId`、`startAt`、`durationHours`、`purpose`
 - `POST /api/reservations/:id/return`
 - `POST /api/reservations/:id/request-return`

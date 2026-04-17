@@ -301,6 +301,21 @@ export function deleteBoard(state, boardId, user, config, now = new Date()) {
   return publicBoard(board, state, now);
 }
 
+export function restoreBoard(state, boardId, user, config, now = new Date()) {
+  requireAdmin(user, state, config);
+  const board = findBoard(state, boardId);
+  if (!board.deleted) return publicBoard(board, state, now);
+
+  const activeReservation = getActiveReservation(state, board.id, now);
+  board.deleted = false;
+  board.status = deriveBoardStatus(board, activeReservation, now);
+  board.currentUserId = activeReservation?.userId || '';
+  board.currentUserName = activeReservation?.userName || '';
+  board.currentReservationId = activeReservation?.id || '';
+  board.updatedAt = nowIso(now);
+  return publicBoard(board, state, now);
+}
+
 export function createReservation(state, input, user, now = new Date()) {
   const boardId = trim(input.boardId);
   const board = findBoard(state, boardId);

@@ -502,6 +502,9 @@ function renderAdmin() {
           <button type="button" class="ghost-button" data-action="delete-board" data-board-id="${escapeHtml(board.id)}" ${
             board.deleted || board.status !== 'available' || board.nextReservation ? 'disabled' : ''
           }>删除</button>
+          <button type="button" class="ghost-button" data-action="restore-board" data-board-id="${escapeHtml(board.id)}" ${
+            board.deleted ? '' : 'disabled'
+          }>恢复</button>
         </div>
       </article>`,
     )
@@ -635,6 +638,16 @@ async function handleAction(target) {
     await api(`/api/boards/${encodeURIComponent(board.id)}`, { method: 'DELETE' });
     showToast('已删除');
     await loadAll();
+    return;
+  }
+
+  if (action === 'restore-board') {
+    const board = state.boards.find((item) => item.id === target.dataset.boardId);
+    if (!board || !window.confirm(`确认恢复 ${board.boardNo}？`)) return;
+    await api(`/api/boards/${encodeURIComponent(board.id)}/restore`, { method: 'POST', body: '{}' });
+    showToast('已恢复');
+    await loadAll();
+    return;
   }
 }
 
