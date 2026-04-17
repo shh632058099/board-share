@@ -172,7 +172,7 @@ test('supports future reservations, overlap checks, and board timeline', async (
     now: '2026-04-16T10:00:00+08:00',
     body: {
       boardId,
-      startAt: '2026-04-16T13:00:00+08:00',
+      startAt: '2026-04-16T13:00',
       durationHours: 2,
       purpose: 'reserved slot',
     },

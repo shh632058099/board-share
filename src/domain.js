@@ -23,8 +23,25 @@ function sameBoardNo(left, right) {
   return trim(left).toLowerCase() === trim(right).toLowerCase();
 }
 
+function parseLocalDateTime(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second = '0'] = match;
+  return new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    0,
+  );
+}
+
 function asDate(value, label = '时间') {
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  const date =
+    value instanceof Date ? new Date(value.getTime()) : parseLocalDateTime(value) || new Date(value);
   if (Number.isNaN(date.getTime())) {
     throw badRequest(`${label}格式不正确`);
   }

@@ -70,6 +70,12 @@ function toDateTimeLocalValue(value) {
   )}`;
 }
 
+function parseDateTimeLocalInput(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function roundToNextHalfHour(value = new Date()) {
   const date = new Date(value.getTime());
   date.setSeconds(0, 0);
@@ -669,11 +675,17 @@ els.timelineForm.addEventListener('submit', async (event) => {
 els.applyForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
+    const startAt = parseDateTimeLocalInput(els.startAtInput.value);
+    if (!startAt) {
+      showToast('请选择有效的开始时间');
+      return;
+    }
+
     await api('/api/reservations', {
       method: 'POST',
       body: JSON.stringify({
         boardId: els.applyBoardId.value,
-        startAt: new Date(els.startAtInput.value).toISOString(),
+        startAt: startAt.toISOString(),
         durationHours: Number(els.durationInput.value),
         purpose: els.purposeInput.value,
       }),
