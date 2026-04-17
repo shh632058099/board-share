@@ -152,6 +152,14 @@ textarea {
   margin-left: auto;
 }
 
+.refresh-meta {
+  color: #5b6770;
+  flex: 0 0 auto;
+  font-size: 0.92rem;
+  line-height: 40px;
+  white-space: nowrap;
+}
+
 main {
   margin: 0 auto;
   max-width: 1180px;
@@ -378,6 +386,11 @@ main {
 
   #refreshButton {
     margin-left: 0;
+  }
+
+  .refresh-meta {
+    line-height: 1.4;
+    width: 100%;
   }
 
   main {

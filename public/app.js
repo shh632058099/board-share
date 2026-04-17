@@ -5,9 +5,16 @@ const state = {
   my: { current: [], upcoming: [], history: [] },
   tab: 'boards',
   authConfig: null,
+  hasLoaded: false,
+  isRefreshing: false,
+  lastUpdatedAt: null,
+  refreshPromise: null,
+  refreshQueued: false,
 };
 
 let loginRedirecting = false;
+let pollingStarted = false;
+const POLL_INTERVAL_MS = 30 * 1000;
 
 const els = {
   userSummary: document.querySelector('#userSummary'),
@@ -16,6 +23,7 @@ const els = {
   userNameInput: document.querySelector('#userNameInput'),
   tabs: document.querySelectorAll('.tab'),
   refreshButton: document.querySelector('#refreshButton'),
+  lastUpdated: document.querySelector('#lastUpdated'),
   boardsView: document.querySelector('#boardsView'),
   timelineView: document.querySelector('#timelineView'),
   mineView: document.querySelector('#mineView'),
@@ -147,6 +155,13 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
+function formatClock(value) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
 function formatAxisDate(value) {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
@@ -174,6 +189,76 @@ function showToast(message) {
   showToast.timer = window.setTimeout(() => {
     els.toast.hidden = true;
   }, 2600);
+}
+
+function friendlyErrorMessage(error) {
+  const rawMessage = String(error?.message || '请求失败');
+  if (rawMessage.includes('该时间段已被预约或占用')) {
+    return '该时间段已被预约，请在时间线选择绿色空闲段';
+  }
+  if (rawMessage.includes('请先登录')) {
+    return '登录已失效，正在重新登录';
+  }
+  if (rawMessage.includes('只有管理员可以执行此操作')) {
+    return '当前用户不是管理员';
+  }
+  if (rawMessage.includes('单板存在未完成占用或预约')) {
+    return '请先处理该单板的占用或预约后再删除';
+  }
+  return rawMessage;
+}
+
+function showError(error) {
+  console.error('请求失败:', error);
+  showToast(friendlyErrorMessage(error));
+}
+
+function renderLastUpdated() {
+  els.lastUpdated.textContent = state.lastUpdatedAt ? `上次更新 ${formatClock(state.lastUpdatedAt)}` : '尚未更新';
+}
+
+function setRefreshButtonLoading() {
+  els.refreshButton.disabled = state.isRefreshing;
+  els.refreshButton.textContent = state.isRefreshing ? '刷新中...' : '刷新';
+}
+
+function renderLoadingPlaceholders() {
+  const loading = '<div class="empty">正在加载</div>';
+  els.boardList.innerHTML = loading;
+  els.timelineBoard.innerHTML = loading;
+  els.myCurrent.innerHTML = loading;
+  els.myUpcoming.innerHTML = loading;
+  els.myHistory.innerHTML = loading;
+  els.adminBoardList.innerHTML = loading;
+}
+
+function updateGlobalLoading() {
+  setRefreshButtonLoading();
+  renderLastUpdated();
+  if (state.isRefreshing && !state.hasLoaded) {
+    renderLoadingPlaceholders();
+  }
+}
+
+async function withButtonLoading(button, callback, loadingText = '处理中...') {
+  if (!button) return callback();
+  if (button.disabled) return undefined;
+  const originalText = button.textContent;
+  const originalDisabled = button.disabled;
+  button.disabled = true;
+  button.textContent = loadingText;
+  try {
+    return await callback();
+  } finally {
+    if (document.contains(button)) {
+      button.disabled = originalDisabled;
+      button.textContent = originalText;
+    }
+  }
+}
+
+function submitButton(form, submitter) {
+  return submitter || form.querySelector('button[type="submit"]');
 }
 
 function currentPageRedirectUri() {
@@ -388,16 +473,26 @@ function usableFreeSlotStart(slot) {
   return normalizeBusinessStartValue(new Date(Math.max(slot.start, nextUsableStart))).getTime();
 }
 
+function suggestedDurationHours(slot, start) {
+  const halfHourMs = 30 * 60 * 1000;
+  const availableHalfHours = Math.floor((slot.end - start) / halfHourMs);
+  if (availableHalfHours < 1) return null;
+  return Math.min(1, availableHalfHours * 0.5);
+}
+
 function renderFreeSlot(board, slot, from, totalMs) {
   const clickStart = usableFreeSlotStart(slot);
-  if (clickStart >= slot.end) return '';
+  const durationHours = suggestedDurationHours(slot, clickStart);
+  if (!durationHours) return '';
 
   const left = percentInRange(slot.start, from, totalMs);
   const width = Math.max(4, ((slot.end - slot.start) / totalMs) * 100);
   const startIso = new Date(clickStart).toISOString();
   return `<button type="button" class="timeline-free-slot" style="left:${left}%;width:${width}%" data-action="apply" data-board-id="${escapeHtml(
     board.id,
-  )}" data-start-at="${escapeHtml(startIso)}" title="从 ${escapeHtml(formatDate(clickStart))} 开始预约">
+  )}" data-start-at="${escapeHtml(startIso)}" data-duration-hours="${escapeHtml(
+    durationHours,
+  )}" title="从 ${escapeHtml(formatDate(clickStart))} 开始预约 ${escapeHtml(durationHours)} 小时">
     <span>预约</span>
   </button>`;
 }
@@ -405,7 +500,7 @@ function renderFreeSlot(board, slot, from, totalMs) {
 function renderTimeline() {
   const timeline = state.timeline;
   if (!timeline) {
-    els.timelineBoard.innerHTML = '<div class="empty">正在加载时间线</div>';
+    els.timelineBoard.innerHTML = '<div class="empty">正在加载</div>';
     return;
   }
 
@@ -435,10 +530,14 @@ function renderTimeline() {
           </div>`;
         })
         .join('');
-      const firstFreeStart = freeSlots.find((slot) => usableFreeSlotStart(slot) < slot.end);
-      const firstStartAt = firstFreeStart
-        ? ` data-start-at="${escapeHtml(new Date(usableFreeSlotStart(firstFreeStart)).toISOString())}"`
-        : '';
+      const firstFreeSlot = freeSlots
+        .map((slot) => {
+          const start = usableFreeSlotStart(slot);
+          return { start, durationHours: suggestedDurationHours(slot, start) };
+        })
+        .find((slot) => slot.durationHours);
+      const firstStartAt = firstFreeSlot ? ` data-start-at="${escapeHtml(new Date(firstFreeSlot.start).toISOString())}"` : '';
+      const firstDuration = firstFreeSlot ? ` data-duration-hours="${escapeHtml(firstFreeSlot.durationHours)}"` : '';
 
       return `<div class="timeline-row">
         <div class="timeline-label">
@@ -447,7 +546,7 @@ function renderTimeline() {
         </div>
         <div class="timeline-canvas">${freeSlotBlocks}${reservationBlocks}</div>
         <div class="timeline-action">
-          <button type="button" class="ghost-button" data-action="apply" data-board-id="${escapeHtml(board.id)}"${firstStartAt} ${
+          <button type="button" class="ghost-button" data-action="apply" data-board-id="${escapeHtml(board.id)}"${firstStartAt}${firstDuration} ${
             firstStartAt ? '' : 'disabled'
           }>预约</button>
         </div>
@@ -516,6 +615,8 @@ function renderShell() {
     ? `${state.user.name} (${state.user.id})${state.user.isAdmin ? '，管理员' : ''}`
     : '未登录';
   els.identityForm.hidden = state.authConfig?.devAuth === false;
+  setRefreshButtonLoading();
+  renderLastUpdated();
   document.querySelectorAll('.admin-only').forEach((item) => {
     item.hidden = !state.user?.isAdmin;
   });
@@ -559,7 +660,7 @@ async function loadTimeline() {
   state.timeline = await api(`/api/timeline?${query}`);
 }
 
-async function loadAll() {
+async function fetchAllData() {
   const mePayload = await api('/api/me');
   state.user = mePayload.user;
   const boardsPath = state.user.isAdmin ? '/api/boards?includeDeleted=true' : '/api/boards';
@@ -567,16 +668,49 @@ async function loadAll() {
   state.boards = boardsPayload.boards;
   state.my = { current: [], upcoming: [], history: [], ...myPayload };
   await loadTimeline();
-  renderAll();
 }
 
-function openApplyDialog(boardId, startAt = undefined) {
+async function refreshData({ silent = false, keepTab = true } = {}) {
+  if (state.isRefreshing) {
+    state.refreshQueued = true;
+    return state.refreshPromise;
+  }
+
+  state.isRefreshing = true;
+  updateGlobalLoading();
+  state.refreshPromise = (async () => {
+    try {
+      do {
+        state.refreshQueued = false;
+        await fetchAllData();
+        if (!keepTab) {
+          state.tab = 'boards';
+        }
+        state.lastUpdatedAt = new Date();
+        state.hasLoaded = true;
+        renderAll();
+      } while (state.refreshQueued);
+      if (!silent) {
+        showToast('已刷新');
+      }
+    } finally {
+      state.isRefreshing = false;
+      state.refreshPromise = null;
+      updateGlobalLoading();
+    }
+  })();
+
+  return state.refreshPromise;
+}
+
+function openApplyDialog(boardId, startAt = undefined, durationHours = '1') {
   const board = state.boards.find((item) => item.id === boardId) || state.timeline?.boards.find((item) => item.board.id === boardId)?.board;
   if (!board) return;
   els.applyBoardId.value = board.id;
   els.applyTitle.textContent = `预约 ${board.boardNo}`;
   els.startAtInput.value = toDateTimeLocalValue(startAt ? new Date(startAt) : roundToNextHalfHour(new Date()));
-  els.durationInput.value = '1';
+  const normalizedDuration = Number(durationHours);
+  els.durationInput.value = Number.isFinite(normalizedDuration) && normalizedDuration >= 0.5 ? String(normalizedDuration) : '1';
   els.purposeInput.value = '';
   els.applyDialog.showModal();
 }
@@ -602,27 +736,31 @@ async function handleAction(target) {
   if (!action) return;
 
   if (action === 'apply') {
-    openApplyDialog(target.dataset.boardId, target.dataset.startAt);
+    openApplyDialog(target.dataset.boardId, target.dataset.startAt, target.dataset.durationHours);
     return;
   }
 
   if (action === 'return') {
-    await api(`/api/reservations/${encodeURIComponent(target.dataset.reservationId)}/return`, {
-      method: 'POST',
-      body: '{}',
+    await withButtonLoading(target, async () => {
+      await api(`/api/reservations/${encodeURIComponent(target.dataset.reservationId)}/return`, {
+        method: 'POST',
+        body: '{}',
+      });
+      showToast('已归还');
+      await refreshData({ silent: true });
     });
-    showToast('已归还');
-    await loadAll();
     return;
   }
 
   if (action === 'request-return') {
-    await api(`/api/reservations/${encodeURIComponent(target.dataset.reservationId)}/request-return`, {
-      method: 'POST',
-      body: '{}',
+    await withButtonLoading(target, async () => {
+      await api(`/api/reservations/${encodeURIComponent(target.dataset.reservationId)}/request-return`, {
+        method: 'POST',
+        body: '{}',
+      });
+      showToast('已发送归还请求');
+      await refreshData({ silent: true });
     });
-    showToast('已发送归还请求');
-    await loadAll();
     return;
   }
 
@@ -635,18 +773,22 @@ async function handleAction(target) {
   if (action === 'delete-board') {
     const board = state.boards.find((item) => item.id === target.dataset.boardId);
     if (!board || !window.confirm(`确认删除 ${board.boardNo}？`)) return;
-    await api(`/api/boards/${encodeURIComponent(board.id)}`, { method: 'DELETE' });
-    showToast('已删除');
-    await loadAll();
+    await withButtonLoading(target, async () => {
+      await api(`/api/boards/${encodeURIComponent(board.id)}`, { method: 'DELETE' });
+      showToast('已删除');
+      await refreshData({ silent: true });
+    });
     return;
   }
 
   if (action === 'restore-board') {
     const board = state.boards.find((item) => item.id === target.dataset.boardId);
     if (!board || !window.confirm(`确认恢复 ${board.boardNo}？`)) return;
-    await api(`/api/boards/${encodeURIComponent(board.id)}/restore`, { method: 'POST', body: '{}' });
-    showToast('已恢复');
-    await loadAll();
+    await withButtonLoading(target, async () => {
+      await api(`/api/boards/${encodeURIComponent(board.id)}/restore`, { method: 'POST', body: '{}' });
+      showToast('已恢复');
+      await refreshData({ silent: true });
+    });
     return;
   }
 }
@@ -657,9 +799,11 @@ els.identityForm.addEventListener('submit', async (event) => {
     showToast('正式环境使用飞书身份登录');
     return;
   }
-  localStorage.setItem('share-board.userId', els.userIdInput.value.trim());
-  localStorage.setItem('share-board.userName', els.userNameInput.value.trim());
-  await loadAll().catch((error) => showToast(error.message));
+  await withButtonLoading(submitButton(els.identityForm, event.submitter), async () => {
+    localStorage.setItem('share-board.userId', els.userIdInput.value.trim());
+    localStorage.setItem('share-board.userName', els.userNameInput.value.trim());
+    await refreshData({ silent: true });
+  }).catch(showError);
 });
 
 els.tabs.forEach((tab) => {
@@ -670,24 +814,21 @@ els.tabs.forEach((tab) => {
 });
 
 els.refreshButton.addEventListener('click', () => {
-  loadAll().then(() => showToast('已刷新')).catch((error) => showToast(error.message));
+  refreshData().catch(showError);
 });
 
 els.statusFilter.addEventListener('change', renderBoards);
 
 els.timelineForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  try {
-    await loadTimeline();
-    renderTimeline();
-  } catch (error) {
-    showToast(error.message);
-  }
+  await withButtonLoading(submitButton(els.timelineForm, event.submitter), async () => {
+    await refreshData({ silent: true });
+  }).catch(showError);
 });
 
 els.applyForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  try {
+  await withButtonLoading(submitButton(els.applyForm, event.submitter), async () => {
     const startAt = parseDateTimeLocalInput(els.startAtInput.value);
     if (!startAt) {
       showToast('请选择有效的开始时间');
@@ -705,10 +846,8 @@ els.applyForm.addEventListener('submit', async (event) => {
     });
     els.applyDialog.close();
     showToast('预约成功');
-    await loadAll();
-  } catch (error) {
-    showToast(error.message);
-  }
+    await refreshData({ silent: true });
+  }).catch(showError);
 });
 
 els.closeApplyButton.addEventListener('click', () => els.applyDialog.close());
@@ -725,7 +864,7 @@ els.boardForm.addEventListener('submit', async (event) => {
     remark: els.remarkInput.value,
   };
 
-  try {
+  await withButtonLoading(submitButton(els.boardForm, event.submitter), async () => {
     if (boardId) {
       await api(`/api/boards/${encodeURIComponent(boardId)}`, {
         method: 'PATCH',
@@ -740,10 +879,8 @@ els.boardForm.addEventListener('submit', async (event) => {
       showToast('已新增');
     }
     resetBoardForm();
-    await loadAll();
-  } catch (error) {
-    showToast(error.message);
-  }
+    await refreshData({ silent: true });
+  }).catch(showError);
 });
 
 els.cancelEditButton.addEventListener('click', resetBoardForm);
@@ -751,15 +888,32 @@ els.cancelEditButton.addEventListener('click', resetBoardForm);
 document.addEventListener('click', (event) => {
   const target = event.target.closest('[data-action]');
   if (!target) return;
-  handleAction(target).catch((error) => showToast(error.message));
+  handleAction(target).catch(showError);
 });
+
+function startAutoRefresh() {
+  if (pollingStarted) return;
+  pollingStarted = true;
+
+  window.setInterval(() => {
+    if (document.visibilityState === 'hidden' || loginRedirecting) return;
+    refreshData({ silent: true }).catch(showError);
+  }, POLL_INTERVAL_MS);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.hasLoaded && !loginRedirecting) {
+      refreshData({ silent: true }).catch(showError);
+    }
+  });
+}
 
 async function bootstrap() {
   try {
     initTimelineRange();
     await loadAuthConfig();
     await completeFeishuLoginIfNeeded();
-    await loadAll();
+    await refreshData({ silent: true });
+    startAutoRefresh();
   } catch (error) {
     if (error.status === 401 && state.authConfig?.devAuth === false) {
       redirectToFeishuLogin();
@@ -767,7 +921,7 @@ async function bootstrap() {
     }
     state.user = null;
     renderShell();
-    showToast(error.message);
+    showError(error);
   }
 }
 
