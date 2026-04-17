@@ -48,6 +48,51 @@ function timeField(value) {
   return text;
 }
 
+const DATE_FIELD_NAMES = new Set([
+  '开始时间',
+  '计划结束时间',
+  '实际归还时间',
+  '请求时间',
+  '创建时间',
+  '更新时间',
+]);
+
+function dateWriteField(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'number') return value < 10_000_000_000 ? value * 1000 : value;
+
+  const text = String(value).trim();
+  if (!text) return undefined;
+  if (/^\d{10,13}$/.test(text)) {
+    const number = Number(text);
+    return text.length === 10 ? number * 1000 : number;
+  }
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.getTime();
+}
+
+function withDateFieldValues(fields) {
+  const converted = {};
+  for (const [name, value] of Object.entries(fields)) {
+    if (!DATE_FIELD_NAMES.has(name)) {
+      converted[name] = value;
+      continue;
+    }
+
+    const dateValue = dateWriteField(value);
+    if (dateValue !== undefined) {
+      converted[name] = dateValue;
+    }
+  }
+  return converted;
+}
+
+function isDatetimeFieldConversionError(error) {
+  return String(error?.message || '').includes('DatetimeFieldConvFail');
+}
+
 function parseJsonField(value, fallback) {
   const text = textField(value);
   if (!text) return fallback;
@@ -294,14 +339,34 @@ export class FeishuBitableStore {
     }
 
     for (const item of items) {
+      const fields = toFields(item);
       try {
         if (item.__recordId) {
-          await this.client.updateBitableRecord(this.appToken, tableId, item.__recordId, toFields(item));
+          await this.client.updateBitableRecord(this.appToken, tableId, item.__recordId, fields);
         } else {
-          const record = await this.client.createBitableRecord(this.appToken, tableId, toFields(item));
+          const record = await this.client.createBitableRecord(this.appToken, tableId, fields);
           item.__recordId = record?.record_id;
         }
       } catch (error) {
+        if (isDatetimeFieldConversionError(error)) {
+          try {
+            const retryFields = withDateFieldValues(fields);
+            if (item.__recordId) {
+              await this.client.updateBitableRecord(this.appToken, tableId, item.__recordId, retryFields);
+            } else {
+              const record = await this.client.createBitableRecord(this.appToken, tableId, retryFields);
+              item.__recordId = record?.record_id;
+            }
+            continue;
+          } catch (retryError) {
+            throw new Error(
+              `写入飞书多维表格 ${label} 表失败：${retryError.message}。已尝试将时间字段转换为毫秒时间戳。app_token=${maskToken(
+                this.appToken,
+              )}，table_id=${tableId}`,
+            );
+          }
+        }
+
         throw new Error(
           `写入飞书多维表格 ${label} 表失败：${error.message}。app_token=${maskToken(
             this.appToken,
