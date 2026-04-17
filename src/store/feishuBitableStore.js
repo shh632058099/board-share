@@ -86,6 +86,25 @@ function boardFromRecord(record) {
   };
 }
 
+function isCompleteReservation(reservation) {
+  return Boolean(
+    reservation.boardId &&
+      reservation.userId &&
+      reservation.startedAt &&
+      reservation.plannedEndAt &&
+      reservation.durationHours > 0,
+  );
+}
+
+function warnSkippedReservation(reservation) {
+  console.warn(
+    `跳过飞书 Reservations 表中的无效记录：record_id=${reservation.__recordId || 'unknown'}，` +
+      `单板ID=${reservation.boardId || '空'}，申请人=${reservation.userId || '空'}，` +
+      `开始时间=${reservation.startedAt || '空'}，计划结束时间=${reservation.plannedEndAt || '空'}，` +
+      `申请时长=${reservation.durationHours || '空'}`,
+  );
+}
+
 function reservationFromRecord(record) {
   return {
     __recordId: record.record_id,
@@ -230,9 +249,16 @@ export class FeishuBitableStore {
       this.readTableRecords('Admins', this.tables.admins),
     ]);
 
+    const mappedReservations = reservations.map(reservationFromRecord);
+    const validReservations = mappedReservations.filter((reservation) => {
+      const valid = isCompleteReservation(reservation);
+      if (!valid) warnSkippedReservation(reservation);
+      return valid;
+    });
+
     return normalizeState({
       boards: boards.map(boardFromRecord),
-      reservations: reservations.map(reservationFromRecord),
+      reservations: validReservations,
       returnRequests: returnRequests.map(returnRequestFromRecord),
       admins: admins.map(adminFromRecord).filter((admin) => admin.userId),
     });
