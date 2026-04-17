@@ -187,25 +187,6 @@ export class FeishuClient {
     });
   }
 
-  async listBitableFields(appToken, tableId) {
-    const fields = [];
-    let pageToken = '';
-
-    do {
-      const query = new URLSearchParams({ page_size: '100' });
-      if (pageToken) {
-        query.set('page_token', pageToken);
-      }
-      const payload = await this.request(
-        `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields?${query}`,
-      );
-      fields.push(...(payload.data?.items || []));
-      pageToken = payload.data?.page_token || '';
-    } while (pageToken);
-
-    return fields;
-  }
-
   async listBitableRecords(appToken, tableId) {
     const records = [];
     let pageToken = '';
