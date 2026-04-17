@@ -136,7 +136,7 @@
     </main>
 
     <dialog id="applyDialog" class="dialog">
-      <form id="applyForm" method="dialog">
+      <form id="applyForm" autocomplete="off">
         <input type="hidden" id="applyBoardId" />
         <h2 id="applyTitle">申请单板</h2>
         <label>
@@ -152,7 +152,7 @@
           <textarea id="purposeInput" rows="4"></textarea>
         </label>
         <div class="form-actions">
-          <button type="submit">确认申请</button>
+          <button id="confirmApplyButton" type="button">确认申请</button>
           <button id="closeApplyButton" class="ghost-button" type="button">取消</button>
         </div>
       </form>
