@@ -32,6 +32,22 @@ function numberField(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function timeField(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'number') {
+    const millis = value < 10_000_000_000 ? value * 1000 : value;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+  }
+  const text = textField(value);
+  if (/^\d{10,13}$/.test(text)) {
+    const number = Number(text);
+    const date = new Date(text.length === 10 ? number * 1000 : number);
+    return Number.isNaN(date.getTime()) ? text : date.toISOString();
+  }
+  return text;
+}
+
 function parseJsonField(value, fallback) {
   const text = textField(value);
   if (!text) return fallback;
@@ -65,8 +81,8 @@ function boardFromRecord(record) {
     currentReservationId: textField(field(record, '当前申请记录')),
     remark: textField(field(record, '备注')),
     deleted: boolField(field(record, '是否删除')),
-    createdAt: textField(field(record, '创建时间')),
-    updatedAt: textField(field(record, '更新时间')),
+    createdAt: timeField(field(record, '创建时间')),
+    updatedAt: timeField(field(record, '更新时间')),
   };
 }
 
@@ -79,13 +95,13 @@ function reservationFromRecord(record) {
     userName: textField(field(record, '申请人姓名')),
     durationHours: numberField(field(record, '申请时长')),
     purpose: textField(field(record, '用途备注')),
-    startedAt: textField(field(record, '开始时间')),
-    plannedEndAt: textField(field(record, '计划结束时间')),
-    returnedAt: textField(field(record, '实际归还时间')) || null,
+    startedAt: timeField(field(record, '开始时间')),
+    plannedEndAt: timeField(field(record, '计划结束时间')),
+    returnedAt: timeField(field(record, '实际归还时间')) || null,
     status: textField(field(record, '状态')) || 'active',
     returnRequestCount: numberField(field(record, '归还请求次数')),
-    createdAt: textField(field(record, '创建时间')),
-    updatedAt: textField(field(record, '更新时间')),
+    createdAt: timeField(field(record, '创建时间')),
+    updatedAt: timeField(field(record, '更新时间')),
   };
 }
 
@@ -96,7 +112,7 @@ function returnRequestFromRecord(record) {
     reservationId: textField(field(record, '申请记录')),
     requesterUserId: textField(field(record, '请求人')),
     requesterName: textField(field(record, '请求人姓名')),
-    requestedAt: textField(field(record, '请求时间')),
+    requestedAt: timeField(field(record, '请求时间')),
     notificationStatus: textField(field(record, '通知状态')) || 'pending',
   };
 }

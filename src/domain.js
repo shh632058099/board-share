@@ -25,7 +25,9 @@ function sameBoardNo(left, right) {
 
 function parseLocalDateTime(value) {
   if (typeof value !== 'string') return null;
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  const match = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})(?:T|\s+)(\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (!match) return null;
   const [, year, month, day, hour, minute, second = '0'] = match;
   return new Date(
@@ -39,11 +41,24 @@ function parseLocalDateTime(value) {
   );
 }
 
+function parseNumericTimestamp(value) {
+  if (typeof value === 'number') {
+    return new Date(value < 10_000_000_000 ? value * 1000 : value);
+  }
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!/^\d{10,13}$/.test(text)) return null;
+  const number = Number(text);
+  return new Date(text.length === 10 ? number * 1000 : number);
+}
+
 function asDate(value, label = '时间') {
   const date =
-    value instanceof Date ? new Date(value.getTime()) : parseLocalDateTime(value) || new Date(value);
+    value instanceof Date
+      ? new Date(value.getTime())
+      : parseNumericTimestamp(value) || parseLocalDateTime(value) || new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw badRequest(`${label}格式不正确`);
+    throw badRequest(`${label}格式不正确：${String(value || '空')}`);
   }
   return date;
 }

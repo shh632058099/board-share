@@ -234,6 +234,38 @@ test('supports future reservations, overlap checks, and board timeline', async (
   assert.equal(boardsDuring.payload.boards[0].currentUserName, 'User 1');
 });
 
+
+test('accepts timestamp and space separated reservation start formats', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: { boardNo: 'B-004', type: 'EVB' },
+  });
+  const boardId = created.payload.board.id;
+
+  const timestampStart = new Date('2026-04-16T13:00:00+08:00').getTime();
+  const first = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T10:00:00+08:00',
+    body: { boardId, startAt: String(timestampStart), durationHours: 1 },
+  });
+  assert.equal(first.status, 201);
+
+  const second = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:00:00+08:00',
+    body: { boardId, startAt: '2026-04-16 14:00', durationHours: 1 },
+  });
+  assert.equal(second.status, 201);
+});
+
 test('creates a Feishu login session and authenticates API calls by cookie', async (t) => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-'));
   const config = loadConfig(
