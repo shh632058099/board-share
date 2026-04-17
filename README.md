@@ -79,3 +79,9 @@ npm test
 - `POST /api/reservations/:id/return`
 - `POST /api/reservations/:id/request-return`
 - `GET /api/my/reservations`
+
+## 常见问题
+
+### 飞书授权登录报 `ReferenceError: fetch is not defined`
+
+这是服务端 Node 版本过旧时常见的问题。当前代码已在飞书客户端里增加 `https.request` fallback；更新代码并重启服务即可。生产环境仍建议使用 Node 18 或更高版本。

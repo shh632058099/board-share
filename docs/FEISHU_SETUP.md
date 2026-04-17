@@ -356,6 +356,10 @@ DEV_AUTH=false
 - `FEISHU_CHAT_ID` 是否正确。
 - 当前使用人的飞书用户 ID 是否是可接收消息的 open_id 或代码中对应的 ID 类型。
 
+### 飞书授权登录报 `ReferenceError: fetch is not defined`
+
+这是服务端 Node 版本过旧时常见的问题。当前代码已在飞书客户端里增加 `https.request` fallback；更新代码并重启服务即可。生产环境仍建议使用 Node 18 或更高版本。
+
 ### 管理员入口不显示
 
 检查：

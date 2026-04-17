@@ -1,3 +1,45 @@
+import https from 'node:https';
+
+async function requestJson(url, { method, headers, body }) {
+  if (typeof fetch === 'function') {
+    const response = await fetch(url, { method, headers, body });
+    return {
+      ok: response.ok,
+      statusText: response.statusText,
+      payload: await response.json().catch(() => ({})),
+    };
+  }
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, { method, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf-8');
+        let payload = {};
+        if (raw) {
+          try {
+            payload = JSON.parse(raw);
+          } catch {
+            payload = {};
+          }
+        }
+        resolve({
+          ok: Number(res.statusCode) >= 200 && Number(res.statusCode) < 300,
+          statusText: res.statusMessage || String(res.statusCode || ''),
+          payload,
+        });
+      });
+    });
+
+    req.on('error', reject);
+    if (body !== undefined) {
+      req.write(body);
+    }
+    req.end();
+  });
+}
+
 export class FeishuClient {
   constructor({ appId, appSecret }) {
     this.appId = appId;
@@ -24,15 +66,19 @@ export class FeishuClient {
       finalHeaders.authorization = `Bearer ${await this.getTenantAccessToken()}`;
     }
 
-    const response = await fetch(`https://open.feishu.cn${path}`, {
+    const serializedBody = body === undefined ? undefined : JSON.stringify(body);
+    if (serializedBody !== undefined) {
+      finalHeaders['content-length'] = Buffer.byteLength(serializedBody);
+    }
+
+    const { ok, statusText, payload } = await requestJson(`https://open.feishu.cn${path}`, {
       method,
       headers: finalHeaders,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: serializedBody,
     });
 
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || (payload.code !== undefined && payload.code !== 0)) {
-      const message = payload.msg || payload.message || response.statusText;
+    if (!ok || (payload.code !== undefined && payload.code !== 0)) {
+      const message = payload.msg || payload.message || statusText;
       throw new Error(`Feishu API failed: ${message}`);
     }
     return payload;
