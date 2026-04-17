@@ -302,7 +302,6 @@ async function serveStatic(req, res, publicDir) {
     const content = await fs.readFile(filePath);
     res.writeHead(200, {
       'content-type': CONTENT_TYPES[extension] || 'application/octet-stream',
-      'cache-control': 'no-store',
     });
     res.end(content);
   } catch (error) {
@@ -311,7 +310,7 @@ async function serveStatic(req, res, publicDir) {
     }
     const fallback = path.join(publicDir, 'index.html');
     const content = await fs.readFile(fallback);
-    res.writeHead(200, { 'content-type': CONTENT_TYPES['.html'], 'cache-control': 'no-store' });
+    res.writeHead(200, { 'content-type': CONTENT_TYPES['.html'] });
     res.end(content);
   }
 }

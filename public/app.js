@@ -47,7 +47,6 @@ const els = {
   durationInput: document.querySelector('#durationInput'),
   purposeInput: document.querySelector('#purposeInput'),
   closeApplyButton: document.querySelector('#closeApplyButton'),
-  confirmApplyButton: document.querySelector('#confirmApplyButton'),
   toast: document.querySelector('#toast'),
 };
 
@@ -686,40 +685,21 @@ els.timelineForm.addEventListener('submit', async (event) => {
   }
 });
 
-async function submitApplyForm() {
-  if (els.confirmApplyButton?.disabled) return;
-
-  const startAt = parseDateTimeLocalInput(els.startAtInput.value);
-  if (!els.applyBoardId.value) {
-    showToast('请选择要预约的单板');
-    return;
-  }
-  if (!startAt) {
-    showToast('请选择有效的开始时间');
-    els.startAtInput.focus();
-    return;
-  }
-
-  const durationHours = Number(els.durationInput.value);
-  if (!Number.isFinite(durationHours) || durationHours < 0.5 || !Number.isInteger(durationHours * 2)) {
-    showToast('申请时长必须至少 0.5 小时，并按 0.5 小时递增');
-    els.durationInput.focus();
-    return;
-  }
-
-  const previousText = els.confirmApplyButton?.textContent || '确认申请';
-  if (els.confirmApplyButton) {
-    els.confirmApplyButton.disabled = true;
-    els.confirmApplyButton.textContent = '提交中...';
-  }
-
+els.applyForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
   try {
+    const startAt = parseDateTimeLocalInput(els.startAtInput.value);
+    if (!startAt) {
+      showToast('请选择有效的开始时间');
+      return;
+    }
+
     await api('/api/reservations', {
       method: 'POST',
       body: JSON.stringify({
         boardId: els.applyBoardId.value,
         startAt: startAt.toISOString(),
-        durationHours,
+        durationHours: Number(els.durationInput.value),
         purpose: els.purposeInput.value,
       }),
     });
@@ -727,22 +707,8 @@ async function submitApplyForm() {
     showToast('预约成功');
     await loadAll();
   } catch (error) {
-    showToast(error.message || '预约失败');
-  } finally {
-    if (els.confirmApplyButton) {
-      els.confirmApplyButton.disabled = false;
-      els.confirmApplyButton.textContent = previousText;
-    }
+    showToast(error.message);
   }
-}
-
-els.applyForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  submitApplyForm();
-});
-
-els.confirmApplyButton?.addEventListener('click', () => {
-  submitApplyForm();
 });
 
 els.closeApplyButton.addEventListener('click', () => els.applyDialog.close());
