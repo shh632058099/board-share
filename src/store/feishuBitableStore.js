@@ -34,6 +34,9 @@ function numberField(value) {
 
 function timeField(value) {
   if (value === undefined || value === null || value === '') return '';
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : value.toISOString();
+  }
   if (typeof value === 'number') {
     const millis = value < 10_000_000_000 ? value * 1000 : value;
     const date = new Date(millis);
