@@ -307,12 +307,10 @@ export class FeishuBitableStore {
   }
 
   async read() {
-    const [boards, reservations, returnRequests, admins] = await Promise.all([
-      this.readTableRecords('Boards', this.tables.boards),
-      this.readTableRecords('Reservations', this.tables.reservations),
-      this.readTableRecords('ReturnRequests', this.tables.returnRequests),
-      this.readTableRecords('Admins', this.tables.admins),
-    ]);
+    const boards = await this.readTableRecords('Boards', this.tables.boards);
+    const reservations = await this.readTableRecords('Reservations', this.tables.reservations);
+    const returnRequests = await this.readTableRecords('ReturnRequests', this.tables.returnRequests);
+    const admins = await this.readTableRecords('Admins', this.tables.admins);
 
     const mappedReservations = reservations.map(reservationFromRecord);
     const validReservations = mappedReservations.filter((reservation) => {
