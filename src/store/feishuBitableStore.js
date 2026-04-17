@@ -158,6 +158,12 @@ function returnRequestFields(request) {
   });
 }
 
+function maskToken(value) {
+  const text = String(value || '');
+  if (text.length <= 8) return text || '未配置';
+  return `${text.slice(0, 4)}...${text.slice(-4)}`;
+}
+
 function adminFields(admin) {
   return cleanFields({
     '管理员飞书用户 ID': admin.userId,
@@ -181,12 +187,31 @@ export class FeishuBitableStore {
     return this.config.feishu.tables;
   }
 
+  async readTableRecords(label, tableId) {
+    if (!this.appToken) {
+      throw new Error(`飞书多维表格 app token 未配置，读取 ${label} 表失败`);
+    }
+    if (!tableId) {
+      throw new Error(`飞书多维表格 ${label} table id 未配置`);
+    }
+
+    try {
+      return await this.client.listBitableRecords(this.appToken, tableId);
+    } catch (error) {
+      throw new Error(
+        `读取飞书多维表格 ${label} 表失败：${error.message}。app_token=${maskToken(
+          this.appToken,
+        )}，table_id=${tableId}`,
+      );
+    }
+  }
+
   async read() {
     const [boards, reservations, returnRequests, admins] = await Promise.all([
-      this.client.listBitableRecords(this.appToken, this.tables.boards),
-      this.client.listBitableRecords(this.appToken, this.tables.reservations),
-      this.client.listBitableRecords(this.appToken, this.tables.returnRequests),
-      this.client.listBitableRecords(this.appToken, this.tables.admins),
+      this.readTableRecords('Boards', this.tables.boards),
+      this.readTableRecords('Reservations', this.tables.reservations),
+      this.readTableRecords('ReturnRequests', this.tables.returnRequests),
+      this.readTableRecords('Admins', this.tables.admins),
     ]);
 
     return normalizeState({
@@ -199,10 +224,10 @@ export class FeishuBitableStore {
 
   async write(state) {
     const normalized = normalizeState(state);
-    await this.syncTable(this.tables.boards, normalized.boards, boardFields);
-    await this.syncTable(this.tables.reservations, normalized.reservations, reservationFields);
-    await this.syncTable(this.tables.returnRequests, normalized.returnRequests, returnRequestFields);
-    await this.syncTable(this.tables.admins, normalized.admins, adminFields);
+    await this.syncTable('Boards', this.tables.boards, normalized.boards, boardFields);
+    await this.syncTable('Reservations', this.tables.reservations, normalized.reservations, reservationFields);
+    await this.syncTable('ReturnRequests', this.tables.returnRequests, normalized.returnRequests, returnRequestFields);
+    await this.syncTable('Admins', this.tables.admins, normalized.admins, adminFields);
   }
 
   async update(mutator) {
@@ -218,13 +243,28 @@ export class FeishuBitableStore {
     return next;
   }
 
-  async syncTable(tableId, items, toFields) {
+  async syncTable(label, tableId, items, toFields) {
+    if (!this.appToken) {
+      throw new Error(`飞书多维表格 app token 未配置，写入 ${label} 表失败`);
+    }
+    if (!tableId) {
+      throw new Error(`飞书多维表格 ${label} table id 未配置`);
+    }
+
     for (const item of items) {
-      if (item.__recordId) {
-        await this.client.updateBitableRecord(this.appToken, tableId, item.__recordId, toFields(item));
-      } else {
-        const record = await this.client.createBitableRecord(this.appToken, tableId, toFields(item));
-        item.__recordId = record?.record_id;
+      try {
+        if (item.__recordId) {
+          await this.client.updateBitableRecord(this.appToken, tableId, item.__recordId, toFields(item));
+        } else {
+          const record = await this.client.createBitableRecord(this.appToken, tableId, toFields(item));
+          item.__recordId = record?.record_id;
+        }
+      } catch (error) {
+        throw new Error(
+          `写入飞书多维表格 ${label} 表失败：${error.message}。app_token=${maskToken(
+            this.appToken,
+          )}，table_id=${tableId}`,
+        );
       }
     }
   }
