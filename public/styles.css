@@ -283,6 +283,13 @@ main {
   grid-template-columns: 1fr auto;
 }
 
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: end;
+}
+
 .board-form {
   background: #ffffff;
   border: 1px solid #dbe1e6;
@@ -407,6 +414,10 @@ main {
   }
 
   .admin-actions {
+    justify-content: start;
+  }
+
+  .row-actions {
     justify-content: start;
   }
 }

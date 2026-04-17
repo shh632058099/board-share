@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { attachPermissions, authenticate } from './auth.js';
 import { loadConfig } from './config.js';
 import {
+  cancelReservation,
   createBoard,
   createReservation,
   deleteBoard,
@@ -112,7 +113,7 @@ function boardIdFromPath(pathname) {
 }
 
 function reservationActionFromPath(pathname) {
-  const match = pathname.match(/^\/api\/reservations\/([^/]+)\/(return|request-return)$/);
+  const match = pathname.match(/^\/api\/reservations\/([^/]+)\/(return|request-return|cancel)$/);
   if (!match) return null;
   return { id: decodeURIComponent(match[1]), action: match[2] };
 }
@@ -262,6 +263,14 @@ async function handleApi(req, res, deps) {
     if (reservationAction.action === 'return') {
       const reservation = await store.update((state) =>
         returnReservation(state, reservationAction.id, user, config, now),
+      );
+      sendJson(res, 200, { reservation });
+      return;
+    }
+
+    if (reservationAction.action === 'cancel') {
+      const reservation = await store.update((state) =>
+        cancelReservation(state, reservationAction.id, user, config, now),
       );
       sendJson(res, 200, { reservation });
       return;

@@ -178,6 +178,7 @@ function statusText(status) {
     reserved: '已预约',
     active: '占用中',
     returned: '已归还',
+    canceled: '已取消',
     deleted: '已删除',
   }[status] || status;
 }
@@ -204,6 +205,12 @@ function friendlyErrorMessage(error) {
   }
   if (rawMessage.includes('单板存在未完成占用或预约')) {
     return '请先处理该单板的占用或预约后再删除';
+  }
+  if (rawMessage.includes('只能取消尚未开始的预约')) {
+    return '只能取消尚未开始的预约';
+  }
+  if (rawMessage.includes('只有预约人或管理员可以取消该预约')) {
+    return '只有预约人或管理员可以取消该预约';
   }
   return rawMessage;
 }
@@ -388,35 +395,47 @@ function renderBoards() {
     .join('');
 }
 
-function reservationRow(reservation, allowReturn) {
-  const action =
-    allowReturn && ['active', 'overdue'].includes(reservation.status)
-      ? `<button type="button" class="ghost-button" data-action="return" data-reservation-id="${escapeHtml(
-          reservation.id,
-        )}">归还</button>`
-      : '';
+function reservationRow(reservation, { allowReturn = false, allowCancel = false } = {}) {
+  const actions = [];
+  const endLabel = reservation.status === 'canceled' ? '取消时间' : '实际归还';
+  const endValue = reservation.status === 'canceled' ? reservation.updatedAt : reservation.returnedAt;
+  if (allowReturn && ['active', 'overdue'].includes(reservation.status)) {
+    actions.push(
+      `<button type="button" class="ghost-button" data-action="return" data-reservation-id="${escapeHtml(
+        reservation.id,
+      )}">归还</button>`,
+    );
+  }
+  if (allowCancel && reservation.status === 'reserved') {
+    actions.push(
+      `<button type="button" class="ghost-button" data-action="cancel-reservation" data-reservation-id="${escapeHtml(
+        reservation.id,
+      )}">取消预约</button>`,
+    );
+  }
+
   return `<article class="reservation-row">
     <div class="meta">
       <strong>${escapeHtml(reservation.boardNo || reservation.board?.boardNo || '未知单板')}</strong>
       <span>状态：${escapeHtml(statusText(reservation.status))}</span>
       <span>开始：${escapeHtml(formatDate(reservation.startedAt))}</span>
       <span>计划归还：${escapeHtml(formatDate(reservation.plannedEndAt))}</span>
-      <span>实际归还：${escapeHtml(formatDate(reservation.returnedAt))}</span>
+      <span>${escapeHtml(endLabel)}：${escapeHtml(formatDate(endValue))}</span>
       <span>用途：${escapeHtml(reservation.purpose || '无')}</span>
     </div>
-    <div>${action}</div>
+    <div class="row-actions">${actions.join('')}</div>
   </article>`;
 }
 
 function renderMine() {
   els.myCurrent.innerHTML = state.my.current.length
-    ? state.my.current.map((reservation) => reservationRow(reservation, true)).join('')
+    ? state.my.current.map((reservation) => reservationRow(reservation, { allowReturn: true })).join('')
     : '<div class="empty">当前没有占用的单板</div>';
   els.myUpcoming.innerHTML = state.my.upcoming.length
-    ? state.my.upcoming.map((reservation) => reservationRow(reservation, false)).join('')
+    ? state.my.upcoming.map((reservation) => reservationRow(reservation, { allowCancel: true })).join('')
     : '<div class="empty">暂无未来预约</div>';
   els.myHistory.innerHTML = state.my.history.length
-    ? state.my.history.map((reservation) => reservationRow(reservation, false)).join('')
+    ? state.my.history.map((reservation) => reservationRow(reservation)).join('')
     : '<div class="empty">暂无历史申请</div>';
 }
 
@@ -759,6 +778,19 @@ async function handleAction(target) {
         body: '{}',
       });
       showToast('已发送归还请求');
+      await refreshData({ silent: true });
+    });
+    return;
+  }
+
+  if (action === 'cancel-reservation') {
+    if (!window.confirm('确认取消这个预约？')) return;
+    await withButtonLoading(target, async () => {
+      await api(`/api/reservations/${encodeURIComponent(target.dataset.reservationId)}/cancel`, {
+        method: 'POST',
+        body: '{}',
+      });
+      showToast('已取消预约');
       await refreshData({ silent: true });
     });
     return;

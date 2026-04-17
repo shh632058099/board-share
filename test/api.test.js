@@ -266,6 +266,96 @@ test('accepts timestamp and space separated reservation start formats', async (t
   assert.equal(second.status, 201);
 });
 
+test('cancels future reservations and releases the reserved slot', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: { boardNo: 'B-005', type: 'EVB' },
+  });
+  const boardId = created.payload.board.id;
+
+  const reserved = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T10:00:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-16T14:00:00+08:00',
+      durationHours: 1,
+    },
+  });
+  assert.equal(reserved.status, 201);
+  const reservationId = reserved.payload.reservation.id;
+
+  const blocked = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:05:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-16T14:30:00+08:00',
+      durationHours: 0.5,
+    },
+  });
+  assert.equal(blocked.status, 409);
+
+  const denied = await request(baseUrl, `/api/reservations/${reservationId}/cancel`, {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:10:00+08:00',
+    body: {},
+  });
+  assert.equal(denied.status, 403);
+
+  const canceled = await request(baseUrl, `/api/reservations/${reservationId}/cancel`, {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T10:15:00+08:00',
+    body: {},
+  });
+  assert.equal(canceled.status, 200);
+  assert.equal(canceled.payload.reservation.status, 'canceled');
+
+  const myReservations = await request(baseUrl, '/api/my/reservations', {
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T10:16:00+08:00',
+  });
+  assert.equal(myReservations.payload.upcoming.length, 0);
+  assert.equal(myReservations.payload.history.length, 1);
+  assert.equal(myReservations.payload.history[0].status, 'canceled');
+
+  const replacement = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-16T10:20:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-16T14:30:00+08:00',
+      durationHours: 0.5,
+    },
+  });
+  assert.equal(replacement.status, 201);
+
+  const timeline = await request(
+    baseUrl,
+    '/api/timeline?from=2026-04-16T13%3A00%3A00.000%2B08%3A00&to=2026-04-16T16%3A00%3A00.000%2B08%3A00',
+    {
+      user: { id: 'ou_user_2', name: 'User 2' },
+      now: '2026-04-16T10:25:00+08:00',
+    },
+  );
+  assert.equal(timeline.status, 200);
+  assert.deepEqual(
+    timeline.payload.boards[0].reservations.map((reservation) => reservation.id),
+    [replacement.payload.reservation.id],
+  );
+});
+
 
 test('restores a soft deleted board', async (t) => {
   const { baseUrl, server, tmpDir } = await startTestServer();
@@ -276,7 +366,7 @@ test('restores a soft deleted board', async (t) => {
 
   const created = await request(baseUrl, '/api/boards', {
     method: 'POST',
-    body: { boardNo: 'B-005', type: 'EVB' },
+    body: { boardNo: 'B-006', type: 'EVB' },
   });
   const boardId = created.payload.board.id;
 

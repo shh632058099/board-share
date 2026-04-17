@@ -10,6 +10,7 @@ import { createId } from './id.js';
 const ACTIVE = 'active';
 const RESERVED = 'reserved';
 const RETURNED = 'returned';
+const CANCELED = 'canceled';
 
 function nowIso(now) {
   return now.toISOString();
@@ -76,7 +77,7 @@ function overlaps(leftStart, leftEnd, rightStart, rightEnd) {
 }
 
 function isOpenReservation(reservation) {
-  return reservation.status !== RETURNED;
+  return reservation.status !== RETURNED && reservation.status !== CANCELED;
 }
 
 function isFutureReservation(reservation, now = new Date()) {
@@ -86,6 +87,7 @@ function isFutureReservation(reservation, now = new Date()) {
 export function deriveReservationStatus(reservation, now = new Date()) {
   if (!reservation) return '';
   if (reservation.status === RETURNED) return RETURNED;
+  if (reservation.status === CANCELED) return CANCELED;
   if (reservationStart(reservation).getTime() > now.getTime()) return RESERVED;
   return isOverdue(reservation.plannedEndAt, now) ? 'overdue' : ACTIVE;
 }
@@ -394,6 +396,40 @@ export function returnReservation(state, reservationId, user, config, now = new 
   return publicReservation(reservation, board, now);
 }
 
+export function cancelReservation(state, reservationId, user, config, now = new Date()) {
+  const reservation = findReservation(state, reservationId);
+  const board = findBoard(state, reservation.boardId);
+  const status = deriveReservationStatus(reservation, now);
+
+  if (status === CANCELED) {
+    throw conflict('该预约已取消');
+  }
+  if (status === RETURNED) {
+    throw conflict('该申请记录已归还');
+  }
+  if (status !== RESERVED) {
+    throw conflict('只能取消尚未开始的预约');
+  }
+
+  const canCancel = reservation.userId === user.id || isAdminUser(user, state, config);
+  if (!canCancel) {
+    throw forbidden('只有预约人或管理员可以取消该预约');
+  }
+
+  const timestamp = nowIso(now);
+  reservation.status = CANCELED;
+  reservation.updatedAt = timestamp;
+
+  const activeReservation = getActiveReservation(state, board.id, now);
+  board.status = deriveBoardStatus(board, activeReservation, now);
+  board.currentUserId = activeReservation?.userId || '';
+  board.currentUserName = activeReservation?.userName || '';
+  board.currentReservationId = activeReservation?.id || '';
+  board.updatedAt = timestamp;
+
+  return publicReservation(reservation, board, now);
+}
+
 export async function requestReturn(state, reservationId, user, now = new Date(), notifier = undefined) {
   const reservation = findReservation(state, reservationId);
   const board = findBoard(state, reservation.boardId);
@@ -461,7 +497,7 @@ export function listMyReservations(state, user, now = new Date()) {
   return {
     current: reservations.filter((reservation) => ['active', 'overdue'].includes(reservation.status)),
     upcoming: reservations.filter((reservation) => reservation.status === RESERVED),
-    history: reservations.filter((reservation) => reservation.status === RETURNED),
+    history: reservations.filter((reservation) => [RETURNED, CANCELED].includes(reservation.status)),
   };
 }
 
@@ -478,7 +514,7 @@ export function listTimeline(state, { from, to, includeDeleted = false, now = ne
     .map((board) => {
       const reservations = state.reservations
         .filter((reservation) => {
-          if (reservation.boardId !== board.id || reservation.status === RETURNED) return false;
+          if (reservation.boardId !== board.id || !isOpenReservation(reservation)) return false;
           return overlaps(reservationStart(reservation), reservationEnd(reservation), fromDate, toDate);
         })
         .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
