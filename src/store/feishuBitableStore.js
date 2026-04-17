@@ -232,15 +232,15 @@ function reservationFields(reservation) {
     单板ID: reservation.boardId,
     申请人: reservation.userId,
     申请人姓名: reservation.userName,
-    申请时长: reservation.durationHours,
+    申请时长: textField(reservation.durationHours),
     用途备注: reservation.purpose || '',
-    开始时间: reservation.startedAt,
-    计划结束时间: reservation.plannedEndAt,
-    实际归还时间: reservation.returnedAt || '',
+    开始时间: timeField(reservation.startedAt),
+    计划结束时间: timeField(reservation.plannedEndAt),
+    实际归还时间: timeField(reservation.returnedAt),
     状态: reservation.status,
     归还请求次数: reservation.returnRequestCount || 0,
-    创建时间: reservation.createdAt,
-    更新时间: reservation.updatedAt,
+    创建时间: timeField(reservation.createdAt),
+    更新时间: timeField(reservation.updatedAt),
   });
 }
 
