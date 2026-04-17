@@ -110,6 +110,60 @@ function isTextFieldConversionError(error) {
   return String(error?.message || '').includes('TextFieldConvFail');
 }
 
+function fieldNameFromMeta(field) {
+  return field.field_name || field.name || '';
+}
+
+function fieldTypeFromMeta(field) {
+  const type = Number(field.type);
+  return Number.isFinite(type) ? type : 0;
+}
+
+function fieldMapFromMeta(fields) {
+  const map = new Map();
+  for (const field of fields || []) {
+    const name = fieldNameFromMeta(field);
+    if (name) map.set(name, field);
+  }
+  return map;
+}
+
+function convertValueByFieldType(value, field) {
+  const type = fieldTypeFromMeta(field);
+
+  if (type === 1) {
+    return value === undefined || value === null ? undefined : String(value);
+  }
+
+  if (type === 2) {
+    if (value === undefined || value === null || value === '') return undefined;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : undefined;
+  }
+
+  if (type === 5) {
+    return dateWriteField(value);
+  }
+
+  if (type === 7) {
+    if (value === undefined || value === null || value === '') return false;
+    return Boolean(value);
+  }
+
+  return value;
+}
+
+function convertFieldsByFieldMap(fields, fieldMap) {
+  if (!fieldMap) return fields;
+  const converted = {};
+  for (const [name, value] of Object.entries(fields)) {
+    const field = fieldMap.get(name);
+    const nextValue = field ? convertValueByFieldType(value, field) : value;
+    if (nextValue !== undefined) converted[name] = nextValue;
+  }
+  return converted;
+}
+
 function parseJsonField(value, fallback) {
   const text = textField(value);
   if (!text) return fallback;
@@ -274,6 +328,7 @@ export class FeishuBitableStore {
     this.client = client;
     this.config = config;
     this.queue = Promise.resolve();
+    this.fieldMapCache = new Map();
   }
 
   get appToken() {
@@ -347,6 +402,27 @@ export class FeishuBitableStore {
     return next;
   }
 
+
+  async getFieldMap(label, tableId) {
+    if (!this.client.listBitableFields) return null;
+    if (this.fieldMapCache.has(tableId)) {
+      return this.fieldMapCache.get(tableId);
+    }
+
+    try {
+      const fields = await this.client.listBitableFields(this.appToken, tableId);
+      const fieldMap = fieldMapFromMeta(fields);
+      this.fieldMapCache.set(tableId, fieldMap);
+      return fieldMap;
+    } catch (error) {
+      console.warn(
+        `读取飞书多维表格 ${label} 字段元数据失败：${error.message}。将使用默认写入格式。`,
+      );
+      this.fieldMapCache.set(tableId, null);
+      return null;
+    }
+  }
+
   async syncTable(label, tableId, items, toFields) {
     if (!this.appToken) {
       throw new Error(`飞书多维表格 app token 未配置，写入 ${label} 表失败`);
@@ -355,8 +431,11 @@ export class FeishuBitableStore {
       throw new Error(`飞书多维表格 ${label} table id 未配置`);
     }
 
+    const fieldMap = await this.getFieldMap(label, tableId);
+
     for (const item of items) {
-      const fields = toFields(item);
+      const rawFields = toFields(item);
+      const fields = convertFieldsByFieldMap(rawFields, fieldMap);
       const writeFields = async (nextFields) => {
         if (item.__recordId) {
           await this.client.updateBitableRecord(this.appToken, tableId, item.__recordId, nextFields);
