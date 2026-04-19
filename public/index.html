@@ -101,6 +101,27 @@
             <p>新增、编辑和软删除空闲单板。</p>
           </div>
         </div>
+        <section class="admin-panel">
+          <div class="section-head compact">
+            <div>
+              <h3>管理员配置</h3>
+              <p>新增或删除可管理单板的用户。</p>
+            </div>
+          </div>
+          <form id="adminForm" class="admin-form" autocomplete="off">
+            <label>
+              用户 ID
+              <input id="adminUserIdInput" required />
+            </label>
+            <label>
+              姓名
+              <input id="adminNameInput" />
+            </label>
+            <button type="submit">新增管理员</button>
+          </form>
+          <div id="adminUserList" class="admin-table"></div>
+        </section>
+        <h3 class="subhead">单板配置</h3>
         <form id="boardForm" class="board-form" autocomplete="off">
           <input type="hidden" id="editingBoardId" />
           <label>

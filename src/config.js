@@ -28,6 +28,7 @@ export function loadConfig(env = process.env, cwd = process.cwd()) {
   return {
     port: Number(env.PORT || 3000),
     dataFile: env.DATA_FILE || path.join(cwd, 'data', 'share-board.json'),
+    sqliteFile: env.SQLITE_FILE || path.join(cwd, 'data', 'share-board.sqlite'),
     publicDir: env.PUBLIC_DIR || path.join(cwd, 'public'),
     devAuth,
     allowTimeOverride: boolFromEnv(env.ALLOW_TIME_OVERRIDE, env.NODE_ENV === 'test'),

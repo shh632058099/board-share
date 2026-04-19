@@ -186,6 +186,10 @@ main {
   max-width: 180px;
 }
 
+.section-head.compact {
+  margin-bottom: 10px;
+}
+
 .board-grid {
   display: grid;
   gap: 14px;
@@ -301,6 +305,22 @@ main {
   padding: 16px;
 }
 
+.admin-panel {
+  margin-bottom: 24px;
+}
+
+.admin-form {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.8fr) auto;
+  margin-bottom: 12px;
+}
+
+.admin-source {
+  color: #5b6770;
+}
+
 .wide {
   grid-column: 1 / -1;
 }
@@ -381,6 +401,7 @@ main {
   .identity-form,
   .timeline-form,
   .board-form,
+  .admin-form,
   .admin-row,
   .reservation-row {
     grid-template-columns: 1fr;

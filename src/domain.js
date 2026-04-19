@@ -20,6 +20,14 @@ function trim(value) {
   return String(value || '').trim();
 }
 
+function actorId(user) {
+  return user?.id || '';
+}
+
+function actorName(user) {
+  return user?.name || '';
+}
+
 function sameBoardNo(left, right) {
   return trim(left).toLowerCase() === trim(right).toLowerCase();
 }
@@ -170,6 +178,121 @@ export function requireAdmin(user, state, config) {
   }
 }
 
+function publicAdmin(admin, source = 'database') {
+  return {
+    userId: admin.userId,
+    name: admin.name || '',
+    openId: admin.openId || '',
+    unionId: admin.unionId || '',
+    role: admin.role || 'admin',
+    enabled: admin.enabled !== false,
+    source,
+    remark: admin.remark || '',
+    createdAt: admin.createdAt || '',
+    updatedAt: admin.updatedAt || '',
+  };
+}
+
+function effectiveAdminCount(state, config, excludedUserId = '') {
+  const seen = new Set();
+  let count = 0;
+
+  for (const adminId of config.adminUserIds) {
+    if (adminId && adminId !== excludedUserId && !seen.has(adminId)) {
+      seen.add(adminId);
+      count += 1;
+    }
+  }
+
+  for (const admin of state.admins) {
+    if (admin.enabled && admin.userId && admin.userId !== excludedUserId && !seen.has(admin.userId)) {
+      seen.add(admin.userId);
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+export function listAdmins(state, user, config) {
+  requireAdmin(user, state, config);
+  const envIds = new Set(config.adminUserIds);
+  const envAdmins = config.adminUserIds.map((userId) =>
+    publicAdmin({ userId, name: '', enabled: true, role: 'admin' }, 'env'),
+  );
+  const dbAdmins = state.admins
+    .filter((admin) => admin.userId && !envIds.has(admin.userId))
+    .map((admin) => publicAdmin(admin, 'database'));
+
+  return [...envAdmins, ...dbAdmins].sort((a, b) => a.userId.localeCompare(b.userId));
+}
+
+export function addAdmin(state, input, user, config, now = new Date()) {
+  requireAdmin(user, state, config);
+  const userId = trim(input.userId);
+  if (!userId) {
+    throw badRequest('管理员用户 ID 不能为空');
+  }
+  if (config.adminUserIds.includes(userId)) {
+    throw conflict('该用户已是配置管理员');
+  }
+
+  const timestamp = nowIso(now);
+  const existing = state.admins.find((admin) => admin.userId === userId);
+  if (existing) {
+    existing.name = trim(input.name);
+    existing.enabled = true;
+    existing.role = existing.role || 'admin';
+    existing.source = 'database';
+    existing.updatedById = actorId(user);
+    existing.updatedByName = actorName(user);
+    existing.updatedAt = timestamp;
+    return publicAdmin(existing, 'database');
+  }
+
+  const admin = {
+    userId,
+    name: trim(input.name),
+    openId: trim(input.openId),
+    unionId: trim(input.unionId),
+    role: trim(input.role) || 'admin',
+    permissions: input.permissions && typeof input.permissions === 'object' ? input.permissions : {},
+    source: 'database',
+    enabled: true,
+    remark: trim(input.remark),
+    attrs: input.attrs && typeof input.attrs === 'object' ? input.attrs : {},
+    createdById: actorId(user),
+    createdByName: actorName(user),
+    updatedById: actorId(user),
+    updatedByName: actorName(user),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  state.admins.push(admin);
+  return publicAdmin(admin, 'database');
+}
+
+export function deleteAdmin(state, userId, user, config) {
+  requireAdmin(user, state, config);
+  const targetUserId = trim(userId);
+  if (config.adminUserIds.includes(targetUserId)) {
+    throw conflict('配置管理员不能从页面删除');
+  }
+
+  const index = state.admins.findIndex((admin) => admin.userId === targetUserId);
+  if (index === -1) {
+    throw notFound('管理员不存在');
+  }
+
+  const target = state.admins[index];
+  if (target.enabled && effectiveAdminCount(state, config, targetUserId) < 1) {
+    throw conflict('不能删除最后一个管理员');
+  }
+
+  state.admins.splice(index, 1);
+  return { ok: true };
+}
+
 export function listBoards(state, { includeDeleted = false, now = new Date() } = {}) {
   return state.boards
     .filter((board) => includeDeleted || !board.deleted)
@@ -262,6 +385,10 @@ export function createBoard(state, input, user, config, now = new Date()) {
     currentReservationId: '',
     remark: values.remark,
     deleted: false,
+    createdById: actorId(user),
+    createdByName: actorName(user),
+    updatedById: actorId(user),
+    updatedByName: actorName(user),
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -282,7 +409,11 @@ export function updateBoard(state, boardId, input, user, config, now = new Date(
     assertUniqueBoardNo(state, values.boardNo, board.id);
   }
 
-  Object.assign(board, values, { updatedAt: nowIso(now) });
+  Object.assign(board, values, {
+    updatedById: actorId(user),
+    updatedByName: actorName(user),
+    updatedAt: nowIso(now),
+  });
   return publicBoard(board, state, now);
 }
 
@@ -299,6 +430,9 @@ export function deleteBoard(state, boardId, user, config, now = new Date()) {
 
   board.deleted = true;
   board.status = 'deleted';
+  board.deletedAt = nowIso(now);
+  board.updatedById = actorId(user);
+  board.updatedByName = actorName(user);
   board.updatedAt = nowIso(now);
   return publicBoard(board, state, now);
 }
@@ -314,6 +448,9 @@ export function restoreBoard(state, boardId, user, config, now = new Date()) {
   board.currentUserId = activeReservation?.userId || '';
   board.currentUserName = activeReservation?.userName || '';
   board.currentReservationId = activeReservation?.id || '';
+  board.deletedAt = null;
+  board.updatedById = actorId(user);
+  board.updatedByName = actorName(user);
   board.updatedAt = nowIso(now);
   return publicBoard(board, state, now);
 }
@@ -340,8 +477,13 @@ export function createReservation(state, input, user, now = new Date()) {
   const reservation = {
     id: createId('resv'),
     boardId: board.id,
+    boardNoSnapshot: board.boardNo || '',
+    boardTypeSnapshot: board.type || '',
+    boardVersionSnapshot: board.version || '',
     userId: user.id,
     userName: user.name,
+    userOpenId: user.openId || '',
+    userUnionId: user.unionId || '',
     durationHours,
     purpose: trim(input.purpose),
     startedAt: startAt.toISOString(),
@@ -349,6 +491,10 @@ export function createReservation(state, input, user, now = new Date()) {
     returnedAt: null,
     status: startAt.getTime() > now.getTime() ? RESERVED : ACTIVE,
     returnRequestCount: 0,
+    createdById: actorId(user),
+    createdByName: actorName(user),
+    updatedById: actorId(user),
+    updatedByName: actorName(user),
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -384,6 +530,12 @@ export function returnReservation(state, reservationId, user, config, now = new 
   const timestamp = nowIso(now);
   reservation.status = RETURNED;
   reservation.returnedAt = timestamp;
+  reservation.returnedById = actorId(user);
+  reservation.returnedByName = actorName(user);
+  reservation.actualDurationHours =
+    (new Date(timestamp).getTime() - reservationStart(reservation).getTime()) / (60 * 60 * 1000);
+  reservation.updatedById = actorId(user);
+  reservation.updatedByName = actorName(user);
   reservation.updatedAt = timestamp;
 
   const activeReservation = getActiveReservation(state, board.id, now);
@@ -418,6 +570,11 @@ export function cancelReservation(state, reservationId, user, config, now = new 
 
   const timestamp = nowIso(now);
   reservation.status = CANCELED;
+  reservation.canceledAt = timestamp;
+  reservation.canceledById = actorId(user);
+  reservation.canceledByName = actorName(user);
+  reservation.updatedById = actorId(user);
+  reservation.updatedByName = actorName(user);
   reservation.updatedAt = timestamp;
 
   const activeReservation = getActiveReservation(state, board.id, now);
@@ -452,14 +609,22 @@ export async function requestReturn(state, reservationId, user, now = new Date()
   const request = {
     id: createId('retreq'),
     reservationId: reservation.id,
+    boardId: board.id,
+    boardNoSnapshot: board.boardNo || '',
+    targetUserId: reservation.userId,
+    targetUserName: reservation.userName,
     requesterUserId: user.id,
     requesterName: user.name,
     requestedAt: timestamp,
     notificationStatus: 'pending',
+    createdAt: timestamp,
+    updatedAt: timestamp,
   };
 
   state.returnRequests.push(request);
   reservation.returnRequestCount = (reservation.returnRequestCount || 0) + 1;
+  reservation.updatedById = actorId(user);
+  reservation.updatedByName = actorName(user);
   reservation.updatedAt = timestamp;
 
   if (notifier) {

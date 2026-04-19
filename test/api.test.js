@@ -6,6 +6,7 @@ import test from 'node:test';
 import { loadConfig } from '../src/config.js';
 import { createApp } from '../src/server.js';
 import { LocalStore } from '../src/store/localStore.js';
+import { SQLiteStore } from '../src/store/sqliteStore.js';
 
 async function startTestServer() {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-'));
@@ -392,6 +393,148 @@ test('restores a soft deleted board', async (t) => {
     user: { id: 'ou_user_1', name: 'User 1' },
   });
   assert.equal(visible.payload.boards.length, 1);
+});
+
+test('manages database admins without deleting the last effective admin', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const denied = await request(baseUrl, '/api/admins', {
+    user: { id: 'ou_user_1', name: 'User 1' },
+  });
+  assert.equal(denied.status, 403);
+
+  const initial = await request(baseUrl, '/api/admins');
+  assert.equal(initial.status, 200);
+  assert.deepEqual(
+    initial.payload.admins.map((admin) => admin.userId),
+    ['ou_admin'],
+  );
+
+  const blockedDelete = await request(baseUrl, '/api/admins/ou_admin', {
+    method: 'DELETE',
+  });
+  assert.equal(blockedDelete.status, 409);
+
+  const added = await request(baseUrl, '/api/admins', {
+    method: 'POST',
+    body: { userId: 'ou_admin_2', name: 'Admin 2' },
+  });
+  assert.equal(added.status, 201);
+  assert.equal(added.payload.admin.userId, 'ou_admin_2');
+
+  const me = await request(baseUrl, '/api/me', {
+    user: { id: 'ou_admin_2', name: 'Admin 2' },
+  });
+  assert.equal(me.payload.user.isAdmin, true);
+
+  const deletedDefault = await request(baseUrl, '/api/admins/ou_admin', {
+    method: 'DELETE',
+    user: { id: 'ou_admin_2', name: 'Admin 2' },
+  });
+  assert.equal(deletedDefault.status, 200);
+
+  const blockedLast = await request(baseUrl, '/api/admins/ou_admin_2', {
+    method: 'DELETE',
+    user: { id: 'ou_admin_2', name: 'Admin 2' },
+  });
+  assert.equal(blockedLast.status, 409);
+});
+
+test('keeps env admins read-only in admin API', async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-'));
+  const config = loadConfig(
+    {
+      NODE_ENV: 'test',
+      DEV_AUTH: 'true',
+      ADMIN_USER_IDS: 'ou_env_admin',
+      DATA_FILE: path.join(tmpDir, 'state.json'),
+    },
+    process.cwd(),
+  );
+  const store = new LocalStore(config.dataFile);
+  const server = createApp({ config, store });
+  await new Promise((resolve) => server.listen(0, resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const admins = await request(baseUrl, '/api/admins', {
+    user: { id: 'ou_env_admin', name: 'Env Admin' },
+  });
+  assert.equal(admins.status, 200);
+  assert.equal(admins.payload.admins.find((admin) => admin.userId === 'ou_env_admin').source, 'env');
+
+  const deleted = await request(baseUrl, '/api/admins/ou_env_admin', {
+    method: 'DELETE',
+    user: { id: 'ou_env_admin', name: 'Env Admin' },
+  });
+  assert.equal(deleted.status, 409);
+});
+
+test('runs core reservation flow with sqlite storage', async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'share-board-sqlite-api-'));
+  const config = loadConfig(
+    {
+      NODE_ENV: 'test',
+      DEV_AUTH: 'true',
+      ALLOW_TIME_OVERRIDE: 'true',
+      STORAGE: 'sqlite',
+      SQLITE_FILE: path.join(tmpDir, 'state.sqlite'),
+    },
+    process.cwd(),
+  );
+  const store = new SQLiteStore(config.sqliteFile);
+  const server = createApp({ config, store });
+  await new Promise((resolve) => server.listen(0, resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    store.close();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: { boardNo: 'B-SQL-API', type: 'EVB' },
+  });
+  assert.equal(created.status, 201);
+
+  const reserved = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_sql', name: 'SQL User' },
+    now: '2026-04-16T10:00:00+08:00',
+    body: {
+      boardId: created.payload.board.id,
+      startAt: '2026-04-16T14:00:00+08:00',
+      durationHours: 1,
+    },
+  });
+  assert.equal(reserved.status, 201);
+  assert.equal(reserved.payload.reservation.status, 'reserved');
+
+  const canceled = await request(baseUrl, `/api/reservations/${reserved.payload.reservation.id}/cancel`, {
+    method: 'POST',
+    user: { id: 'ou_user_sql', name: 'SQL User' },
+    now: '2026-04-16T10:30:00+08:00',
+    body: {},
+  });
+  assert.equal(canceled.status, 200);
+  assert.equal(canceled.payload.reservation.status, 'canceled');
+
+  const state = await store.read();
+  assert.equal(state.boards[0].boardNo, 'B-SQL-API');
+  assert.equal(state.reservations[0].status, 'canceled');
+  assert.equal(state.reservations[0].boardNoSnapshot, 'B-SQL-API');
 });
 
 test('creates a Feishu login session and authenticates API calls by cookie', async (t) => {

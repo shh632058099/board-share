@@ -10,5 +10,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "TZ=Asia/Shanghai node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0"
   }
 }

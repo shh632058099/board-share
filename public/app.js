@@ -3,6 +3,7 @@ const state = {
   boards: [],
   timeline: null,
   my: { current: [], upcoming: [], history: [] },
+  admins: [],
   tab: 'boards',
   authConfig: null,
   hasLoaded: false,
@@ -47,6 +48,10 @@ const els = {
   remarkInput: document.querySelector('#remarkInput'),
   cancelEditButton: document.querySelector('#cancelEditButton'),
   adminBoardList: document.querySelector('#adminBoardList'),
+  adminForm: document.querySelector('#adminForm'),
+  adminUserIdInput: document.querySelector('#adminUserIdInput'),
+  adminNameInput: document.querySelector('#adminNameInput'),
+  adminUserList: document.querySelector('#adminUserList'),
   applyDialog: document.querySelector('#applyDialog'),
   applyForm: document.querySelector('#applyForm'),
   applyBoardId: document.querySelector('#applyBoardId'),
@@ -212,6 +217,12 @@ function friendlyErrorMessage(error) {
   if (rawMessage.includes('只有预约人或管理员可以取消该预约')) {
     return '只有预约人或管理员可以取消该预约';
   }
+  if (rawMessage.includes('不能删除最后一个管理员')) {
+    return '至少保留一个管理员';
+  }
+  if (rawMessage.includes('配置管理员不能从页面删除')) {
+    return '配置管理员需要在环境变量中调整';
+  }
   return rawMessage;
 }
 
@@ -237,6 +248,7 @@ function renderLoadingPlaceholders() {
   els.myUpcoming.innerHTML = loading;
   els.myHistory.innerHTML = loading;
   els.adminBoardList.innerHTML = loading;
+  els.adminUserList.innerHTML = loading;
 }
 
 function updateGlobalLoading() {
@@ -596,11 +608,46 @@ function parseSubcards(value) {
     .filter((item) => item.name || item.model || item.remark);
 }
 
+function renderAdmins() {
+  if (!state.user?.isAdmin) {
+    els.adminUserList.innerHTML = '<div class="empty">当前用户不是管理员</div>';
+    return;
+  }
+
+  if (!state.admins.length) {
+    els.adminUserList.innerHTML = '<div class="empty">暂无管理员</div>';
+    return;
+  }
+
+  els.adminUserList.innerHTML = state.admins
+    .map((admin) => {
+      const isEnv = admin.source === 'env';
+      const isSelf = admin.userId === state.user?.id;
+      return `<article class="admin-row admin-user-row">
+        <div>
+          <strong>${escapeHtml(admin.userId)}</strong>
+          <p>${escapeHtml(admin.name || '未填写姓名')}</p>
+        </div>
+        <div><span class="badge ${admin.enabled ? 'available' : 'deleted'}">${admin.enabled ? '启用' : '停用'}</span></div>
+        <div><span class="admin-source">${isEnv ? '配置管理员' : '页面管理员'}</span></div>
+        <div class="admin-actions">
+          <button type="button" class="ghost-button" data-action="delete-admin" data-admin-id="${escapeHtml(
+            admin.userId,
+          )}" ${isEnv ? 'disabled' : ''}>${isSelf ? '删除自己' : '删除'}</button>
+        </div>
+      </article>`;
+    })
+    .join('');
+}
+
 function renderAdmin() {
   if (!state.user?.isAdmin) {
     els.adminBoardList.innerHTML = '<div class="empty">当前用户不是管理员</div>';
+    els.adminUserList.innerHTML = '<div class="empty">当前用户不是管理员</div>';
     return;
   }
+
+  renderAdmins();
 
   if (!state.boards.length) {
     els.adminBoardList.innerHTML = '<div class="empty">暂无单板</div>';
@@ -683,9 +730,14 @@ async function fetchAllData() {
   const mePayload = await api('/api/me');
   state.user = mePayload.user;
   const boardsPath = state.user.isAdmin ? '/api/boards?includeDeleted=true' : '/api/boards';
-  const [boardsPayload, myPayload] = await Promise.all([api(boardsPath), api('/api/my/reservations')]);
+  const [boardsPayload, myPayload, adminsPayload] = await Promise.all([
+    api(boardsPath),
+    api('/api/my/reservations'),
+    state.user.isAdmin ? api('/api/admins') : Promise.resolve({ admins: [] }),
+  ]);
   state.boards = boardsPayload.boards;
   state.my = { current: [], upcoming: [], history: [], ...myPayload };
+  state.admins = adminsPayload.admins || [];
   await loadTimeline();
 }
 
@@ -823,6 +875,22 @@ async function handleAction(target) {
     });
     return;
   }
+
+  if (action === 'delete-admin') {
+    const admin = state.admins.find((item) => item.userId === target.dataset.adminId);
+    if (!admin) return;
+    const message =
+      admin.userId === state.user?.id
+        ? '确认删除自己的管理员权限？删除后会退出管理页。'
+        : `确认删除管理员 ${admin.name || admin.userId}？`;
+    if (!window.confirm(message)) return;
+    await withButtonLoading(target, async () => {
+      await api(`/api/admins/${encodeURIComponent(admin.userId)}`, { method: 'DELETE' });
+      showToast('已删除管理员');
+      await refreshData({ silent: true });
+    });
+    return;
+  }
 }
 
 els.identityForm.addEventListener('submit', async (event) => {
@@ -916,6 +984,22 @@ els.boardForm.addEventListener('submit', async (event) => {
 });
 
 els.cancelEditButton.addEventListener('click', resetBoardForm);
+
+els.adminForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await withButtonLoading(submitButton(els.adminForm, event.submitter), async () => {
+    await api('/api/admins', {
+      method: 'POST',
+      body: JSON.stringify({
+        userId: els.adminUserIdInput.value.trim(),
+        name: els.adminNameInput.value.trim(),
+      }),
+    });
+    els.adminForm.reset();
+    showToast('已新增管理员');
+    await refreshData({ silent: true });
+  }).catch(showError);
+});
 
 document.addEventListener('click', (event) => {
   const target = event.target.closest('[data-action]');

@@ -5,10 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { attachPermissions, authenticate } from './auth.js';
 import { loadConfig } from './config.js';
 import {
+  addAdmin,
   cancelReservation,
   createBoard,
   createReservation,
+  deleteAdmin,
   deleteBoard,
+  listAdmins,
   listBoards,
   listMyReservations,
   listTimeline,
@@ -118,6 +121,11 @@ function reservationActionFromPath(pathname) {
   return { id: decodeURIComponent(match[1]), action: match[2] };
 }
 
+function adminUserIdFromPath(pathname) {
+  const match = pathname.match(/^\/api\/admins\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 async function handleAuthApi(req, res, deps) {
   const { config, store, feishuClient, sessionStore } = deps;
   const url = new URL(req.url, 'http://localhost');
@@ -197,6 +205,26 @@ async function handleApi(req, res, deps) {
 
   if (req.method === 'GET' && pathname === '/api/me') {
     sendJson(res, 200, { user });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admins') {
+    const state = await store.read();
+    sendJson(res, 200, { admins: listAdmins(state, user, config) });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admins') {
+    const body = await readJsonBody(req);
+    const admin = await store.update((state) => addAdmin(state, body, user, config, now));
+    sendJson(res, 201, { admin });
+    return;
+  }
+
+  const adminUserId = adminUserIdFromPath(pathname);
+  if (adminUserId && req.method === 'DELETE') {
+    const result = await store.update((state) => deleteAdmin(state, adminUserId, user, config, now));
+    sendJson(res, 200, result);
     return;
   }
 

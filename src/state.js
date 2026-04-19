@@ -22,8 +22,13 @@ export function normalizeState(value, { seedLocalAdmin = false } = {}) {
     admins: Array.isArray(state.admins) ? state.admins : [],
   };
 
-  if (seedLocalAdmin && !normalized.admins.some((admin) => admin.userId === DEFAULT_LOCAL_ADMIN.userId)) {
-    normalized.admins.push({ ...DEFAULT_LOCAL_ADMIN });
+  if (seedLocalAdmin && !normalized.admins.some((admin) => admin.enabled)) {
+    const existing = normalized.admins.find((admin) => admin.userId === DEFAULT_LOCAL_ADMIN.userId);
+    if (existing) {
+      Object.assign(existing, DEFAULT_LOCAL_ADMIN);
+    } else {
+      normalized.admins.push({ ...DEFAULT_LOCAL_ADMIN });
+    }
   }
 
   return normalized;

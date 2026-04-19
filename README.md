@@ -1,6 +1,6 @@
 # 单板共享
 
-基于 `PLAN.md` 的最小可运行实现：静态前端 + Node.js 后端 API。默认使用本地 JSON 文件存储，配置飞书环境变量后可接入飞书鉴权、消息通知和多维表格。
+基于 `PLAN.md` 的最小可运行实现：静态前端 + Node.js 后端 API。默认使用本地 JSON 文件存储，也支持 SQLite 本地数据库；配置飞书环境变量后可接入飞书鉴权、消息通知和多维表格。
 
 ## 功能
 
@@ -36,9 +36,10 @@ npm test
 
 - `PORT`：服务端口，默认 `3000`
 - `DATA_FILE`：本地 JSON 数据文件，默认 `data/share-board.json`
+- `SQLITE_FILE`：SQLite 数据库文件，默认 `data/share-board.sqlite`
 - `DEV_AUTH`：是否允许本地请求头身份，默认 `true`
 - `ADMIN_USER_IDS`：管理员飞书用户 ID，英文逗号分隔
-- `STORAGE`：`local` 或 `feishu`，默认 `local`
+- `STORAGE`：`local`、`sqlite` 或 `feishu`，默认 `local`
 - `SESSION_COOKIE_NAME`：登录态 cookie 名称，默认 `sb_session`
 - `SESSION_MAX_AGE_SECONDS`：登录态有效期，默认 7 天
 - `SESSION_COOKIE_SECURE`：是否只通过 HTTPS 写 cookie；飞书正式环境建议 `true`
@@ -63,6 +64,26 @@ npm test
 - ReturnRequests：`ID`、`申请记录`、`请求人`、`请求人姓名`、`请求时间`、`通知状态`
 - Admins：`管理员飞书用户 ID`、`姓名`、`启用状态`
 
+SQLite 本地存储：
+
+```bash
+STORAGE=sqlite SQLITE_FILE=data/share-board.sqlite npm start
+```
+
+从 JSON 本地存储迁移到 SQLite：
+
+```bash
+DATA_FILE=data/share-board.json SQLITE_FILE=data/share-board.sqlite node scripts/migrate-local-json-to-sqlite.js
+```
+
+如果目标 SQLite 文件已存在，脚本会拒绝覆盖；确认覆盖时增加 `--force`。
+
+管理员配置：
+
+- `ADMIN_USER_IDS` 是环境变量管理员，会在页面中显示为“配置管理员”，不能从页面删除。
+- 管理页可新增或删除数据库管理员。
+- 系统会拒绝删除最后一个有效管理员，避免锁死管理权限。
+
 ## 飞书接入教程
 
 飞书工作台、自建应用、多维表格、权限和群提醒的完整配置步骤见：[docs/FEISHU_SETUP.md](docs/FEISHU_SETUP.md)。
@@ -72,6 +93,9 @@ npm test
 - `GET /api/me`
 - `GET /api/boards`
 - `GET /api/timeline`：查询所有单板在时间范围内的预约和占用片段，支持 `from`、`to` 参数
+- `GET /api/admins`
+- `POST /api/admins`
+- `DELETE /api/admins/:userId`
 - `POST /api/boards`
 - `PATCH /api/boards/:id`
 - `DELETE /api/boards/:id`：软删除单板
