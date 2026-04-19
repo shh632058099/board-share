@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "scripts": {
     "start": "node src/server.js",
@@ -12,6 +12,6 @@
     "test": "TZ=Asia/Shanghai node --test"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0"
+    "better-sqlite3": "^9.6.0"
   }
 }
