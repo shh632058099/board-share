@@ -28,6 +28,7 @@ const els = {
   boardsView: document.querySelector('#boardsView'),
   timelineView: document.querySelector('#timelineView'),
   mineView: document.querySelector('#mineView'),
+  helpView: document.querySelector('#helpView'),
   adminView: document.querySelector('#adminView'),
   boardList: document.querySelector('#boardList'),
   statusFilter: document.querySelector('#statusFilter'),
@@ -695,6 +696,7 @@ function renderShell() {
   els.boardsView.hidden = state.tab !== 'boards';
   els.timelineView.hidden = state.tab !== 'timeline';
   els.mineView.hidden = state.tab !== 'mine';
+  els.helpView.hidden = state.tab !== 'help';
   els.adminView.hidden = state.tab !== 'admin';
 }
 

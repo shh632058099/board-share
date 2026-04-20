@@ -32,6 +32,7 @@
       <button class="tab is-active" data-tab="boards" type="button">单板列表</button>
       <button class="tab" data-tab="timeline" type="button">占用时间线</button>
       <button class="tab" data-tab="mine" type="button">我的使用</button>
+      <button class="tab" data-tab="help" type="button">帮助</button>
       <button class="tab admin-only" data-tab="admin" type="button" hidden>管理</button>
       <button id="refreshButton" class="ghost-button" type="button">刷新</button>
       <span id="lastUpdated" class="refresh-meta">尚未更新</span>
@@ -92,6 +93,102 @@
         <div id="myUpcoming" class="stack"></div>
         <h3 class="subhead">历史记录</h3>
         <div id="myHistory" class="stack"></div>
+      </section>
+
+      <section id="helpView" class="view" hidden>
+        <div class="help-hero">
+          <img class="help-image" src="/assets/board.png" alt="" />
+          <div>
+            <h2>帮助</h2>
+            <p>按下面步骤操作，就能完成预约、取消、归还和管理。</p>
+          </div>
+        </div>
+
+        <div class="help-grid">
+          <article class="help-card">
+            <h3>普通用户最快路线</h3>
+            <ol>
+              <li>打开“单板列表”。</li>
+              <li>找到要用的单板，点击“预约”。</li>
+              <li>选择开始时间和申请时长。</li>
+              <li>用完后进入“我的使用”，点击“归还”。</li>
+            </ol>
+          </article>
+          <article class="help-card">
+            <h3>找空闲时间</h3>
+            <ol>
+              <li>打开“占用时间线”。</li>
+              <li>选择开始和结束时间，点击“查看”。</li>
+              <li>点击绿色空闲段上的“预约”。</li>
+              <li>确认申请信息。</li>
+            </ol>
+          </article>
+          <article class="help-card">
+            <h3>管理员最快路线</h3>
+            <ol>
+              <li>进入“管理”。</li>
+              <li>在“管理员配置”里新增管理员。</li>
+              <li>在“单板配置”里新增或编辑单板。</li>
+              <li>空闲单板可以删除，已删除单板可以恢复。</li>
+            </ol>
+          </article>
+        </div>
+
+        <div class="help-section">
+          <h3>页面怎么找</h3>
+          <div class="help-map" aria-label="页面导航示意">
+            <span>单板列表</span>
+            <b>预约</b>
+            <span>占用时间线</span>
+            <b>找空闲段</b>
+            <span>我的使用</span>
+            <b>取消/归还</b>
+            <span>管理</span>
+            <b>管理员和单板配置</b>
+          </div>
+        </div>
+
+        <div class="help-section">
+          <h3>预约单板</h3>
+          <div class="help-steps">
+            <div><strong>1</strong><span>点击“预约”</span></div>
+            <div><strong>2</strong><span>选择开始时间</span></div>
+            <div><strong>3</strong><span>填写申请时长</span></div>
+            <div><strong>4</strong><span>点击“确认申请”</span></div>
+          </div>
+          <p>申请时长最小是 0.5 小时，只能按 0.5 小时递增。用途备注建议写清楚，例如“调试 OTA 升级”。</p>
+        </div>
+
+        <div class="help-section">
+          <h3>取消预约</h3>
+          <p>只能取消尚未开始的预约。进入“我的使用”，在“我的预约”里点击“取消预约”。取消后，这段时间会重新变为空闲。</p>
+        </div>
+
+        <div class="help-section">
+          <h3>归还单板</h3>
+          <p>用完后进入“我的使用”，在“当前占用”里点击“归还”。归还后，单板会重新变成可申请。</p>
+        </div>
+
+        <div class="help-section">
+          <h3>请求别人归还</h3>
+          <p>如果单板显示“已超时”，可以在“单板列表”点击“请求归还”。如果系统配置了飞书通知，会尝试发送提醒。</p>
+        </div>
+
+        <div class="help-section">
+          <h3>管理员配置</h3>
+          <p>只有管理员能看到“管理”。在“管理员配置”里输入用户 ID 和姓名，点击“新增管理员”。用户 ID 可以从页面顶部姓名后面的括号里复制。</p>
+          <div class="help-note">环境变量里的管理员会显示为“配置管理员”，不能在页面删除。系统不允许删除最后一个有效管理员。</div>
+        </div>
+
+        <div class="help-section">
+          <h3>常见提示</h3>
+          <div class="help-table">
+            <div><strong>该时间段已被预约</strong><span>换一个绿色空闲段。</span></div>
+            <div><strong>当前用户不是管理员</strong><span>联系管理员添加权限。</span></div>
+            <div><strong>只能取消尚未开始的预约</strong><span>已经开始的记录需要归还。</span></div>
+            <div><strong>至少保留一个管理员</strong><span>先新增另一个管理员。</span></div>
+          </div>
+        </div>
       </section>
 
       <section id="adminView" class="view" hidden>

@@ -294,6 +294,118 @@ main {
   justify-content: end;
 }
 
+.help-hero {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.help-image {
+  border-radius: 8px;
+  height: 72px;
+  width: 72px;
+}
+
+.help-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.help-card,
+.help-section {
+  background: #ffffff;
+  border: 1px solid #dbe1e6;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.help-card h3,
+.help-section h3 {
+  margin-bottom: 10px;
+}
+
+.help-card ol {
+  color: #394750;
+  line-height: 1.65;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.help-section {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.help-map,
+.help-steps,
+.help-table {
+  display: grid;
+  gap: 10px;
+}
+
+.help-map {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.help-map span,
+.help-map b,
+.help-steps div,
+.help-table div,
+.help-note {
+  border: 1px solid #dbe1e6;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.help-map span {
+  background: #edf7f2;
+  color: #135c38;
+  font-weight: 600;
+}
+
+.help-map b {
+  background: #f6f7f8;
+  color: #394750;
+  font-weight: 500;
+}
+
+.help-steps {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.help-steps div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.help-steps strong {
+  align-items: center;
+  background: #087f5b;
+  border-radius: 50%;
+  color: #ffffff;
+  display: inline-flex;
+  flex: 0 0 30px;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.help-table div {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(180px, 0.8fr) 1fr;
+}
+
+.help-note {
+  background: #fff8e1;
+  color: #5f4b00;
+}
+
 .board-form {
   background: #ffffff;
   border: 1px solid #dbe1e6;
@@ -403,8 +515,16 @@ main {
   .board-form,
   .admin-form,
   .admin-row,
-  .reservation-row {
+  .reservation-row,
+  .help-grid,
+  .help-map,
+  .help-steps,
+  .help-table div {
     grid-template-columns: 1fr;
+  }
+
+  .help-hero {
+    align-items: start;
   }
 
   .tabs {
