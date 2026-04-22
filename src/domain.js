@@ -11,6 +11,7 @@ const ACTIVE = 'active';
 const RESERVED = 'reserved';
 const RETURNED = 'returned';
 const CANCELED = 'canceled';
+const MAX_DATE_MS = 8_640_000_000_000_000;
 
 function nowIso(now) {
   return now.toISOString();
@@ -78,6 +79,13 @@ function reservationStart(reservation) {
 
 function reservationEnd(reservation) {
   return asDate(reservation.plannedEndAt, '结束时间');
+}
+
+function reservationBlockingEnd(reservation, now = new Date()) {
+  if (deriveReservationStatus(reservation, now) === 'overdue') {
+    return new Date(MAX_DATE_MS);
+  }
+  return reservationEnd(reservation);
 }
 
 function overlaps(leftStart, leftEnd, rightStart, rightEnd) {
@@ -353,12 +361,19 @@ function findReservation(state, reservationId) {
   return reservation;
 }
 
-function assertReservationSlotAvailable(state, boardId, startAt, endAt, ignoreReservationId = undefined) {
+function assertReservationSlotAvailable(
+  state,
+  boardId,
+  startAt,
+  endAt,
+  ignoreReservationId = undefined,
+  now = new Date(),
+) {
   const conflicting = state.reservations.find((reservation) => {
     if (reservation.id === ignoreReservationId || reservation.boardId !== boardId || !isOpenReservation(reservation)) {
       return false;
     }
-    return overlaps(startAt, endAt, reservationStart(reservation), reservationEnd(reservation));
+    return overlaps(startAt, endAt, reservationStart(reservation), reservationBlockingEnd(reservation, now));
   });
 
   if (conflicting) {
@@ -421,9 +436,9 @@ export function deleteBoard(state, boardId, user, config, now = new Date()) {
   requireAdmin(user, state, config);
   const board = findBoard(state, boardId);
   if (board.deleted) return publicBoard(board, state, now);
-  const hasOpenReservation = state.reservations.some((reservation) => {
-    return reservation.boardId === board.id && isOpenReservation(reservation) && reservationEnd(reservation) > now;
-  });
+  const hasOpenReservation = state.reservations.some(
+    (reservation) => reservation.boardId === board.id && isOpenReservation(reservation),
+  );
   if (hasOpenReservation) {
     throw conflict('单板存在未完成占用或预约，请处理后再删除');
   }
@@ -471,7 +486,7 @@ export function createReservation(state, input, user, now = new Date()) {
     throw badRequest('预约开始时间不能早于当前时间');
   }
   const plannedEnd = addBusinessHours(startAt, durationHours);
-  assertReservationSlotAvailable(state, board.id, startAt, plannedEnd);
+  assertReservationSlotAvailable(state, board.id, startAt, plannedEnd, undefined, now);
 
   const timestamp = nowIso(now);
   const reservation = {
@@ -680,7 +695,12 @@ export function listTimeline(state, { from, to, includeDeleted = false, now = ne
       const reservations = state.reservations
         .filter((reservation) => {
           if (reservation.boardId !== board.id || !isOpenReservation(reservation)) return false;
-          return overlaps(reservationStart(reservation), reservationEnd(reservation), fromDate, toDate);
+          return overlaps(
+            reservationStart(reservation),
+            reservationBlockingEnd(reservation, now),
+            fromDate,
+            toDate,
+          );
         })
         .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
         .map((reservation) => publicReservation(reservation, board, now));

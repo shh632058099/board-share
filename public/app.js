@@ -176,6 +176,29 @@ function formatAxisDate(value) {
   }).format(new Date(value));
 }
 
+function formatDurationText(minutesValue) {
+  const totalMinutes = Math.max(0, Math.ceil(Number(minutesValue) || 0));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+
+  if (days) parts.push(`${days}天`);
+  if (hours) parts.push(`${hours}小时`);
+  if (!days && !hours && minutes) parts.push(`${minutes}分钟`);
+  if (!parts.length) parts.push('1分钟内');
+
+  return parts.slice(0, 2).join('');
+}
+
+function overdueDurationText(plannedEndAt, now = new Date()) {
+  if (!plannedEndAt) return '';
+  const end = new Date(plannedEndAt);
+  const diffMs = now.getTime() - end.getTime();
+  if (Number.isNaN(end.getTime()) || diffMs <= 0) return '';
+  return formatDurationText(diffMs / (60 * 1000));
+}
+
 function statusText(status) {
   return {
     available: '可申请',
@@ -462,11 +485,18 @@ function percentInRange(value, from, totalMs) {
   return Math.max(0, Math.min(100, ((value - from.getTime()) / totalMs) * 100));
 }
 
+function timelineBusyEnd(reservation, to) {
+  if (reservation.status === 'overdue') {
+    return to.getTime();
+  }
+  return new Date(reservation.plannedEndAt).getTime();
+}
+
 function freeSlotsForReservations(reservations, from, to) {
   const busy = reservations
     .map((reservation) => ({
       start: Math.max(new Date(reservation.startedAt).getTime(), from.getTime()),
-      end: Math.min(new Date(reservation.plannedEndAt).getTime(), to.getTime()),
+      end: Math.min(timelineBusyEnd(reservation, to), to.getTime()),
     }))
     .filter((slot) => slot.end > slot.start)
     .sort((a, b) => a.start - b.start);
@@ -529,6 +559,125 @@ function renderFreeSlot(board, slot, from, totalMs) {
   </button>`;
 }
 
+function timelineSegments(reservation, from, to) {
+  const windowStart = from.getTime();
+  const windowEnd = to.getTime();
+  const startAt = new Date(reservation.startedAt).getTime();
+  const plannedEndAt = new Date(reservation.plannedEndAt).getTime();
+
+  if (Number.isNaN(startAt) || Number.isNaN(plannedEndAt)) {
+    return [];
+  }
+
+  if (reservation.status === 'overdue') {
+    const segments = [];
+    const activeStart = Math.max(startAt, windowStart);
+    const activeEnd = Math.min(plannedEndAt, windowEnd);
+    if (activeEnd > activeStart) {
+      segments.push({ status: 'active', start: activeStart, end: activeEnd, openEnded: false });
+    }
+
+    const overdueStart = Math.max(plannedEndAt, windowStart);
+    if (windowEnd > overdueStart) {
+      segments.push({ status: 'overdue', start: overdueStart, end: windowEnd, openEnded: true });
+    }
+
+    return segments;
+  }
+
+  const start = Math.max(startAt, windowStart);
+  const end = Math.min(plannedEndAt, windowEnd);
+  if (end <= start) {
+    return [];
+  }
+
+  return [{ status: reservation.status, start, end, openEnded: false }];
+}
+
+function timelineBlockSubtitle(reservation, segmentStatus, now = new Date()) {
+  if (segmentStatus === 'overdue') {
+    const overdueText = overdueDurationText(reservation.plannedEndAt, now);
+    return overdueText ? `已超时 ${overdueText}` : '已超时';
+  }
+  if (segmentStatus === 'reserved') {
+    return `开始 ${formatDate(reservation.startedAt)}`;
+  }
+  return `计划归还 ${formatDate(reservation.plannedEndAt)}`;
+}
+
+function timelineBlockTitle(reservation, segmentStatus, now = new Date()) {
+  const parts = [
+    reservation.userName || '未知用户',
+    `开始 ${formatDate(reservation.startedAt)}`,
+    `计划归还 ${formatDate(reservation.plannedEndAt)}`,
+  ];
+
+  if (segmentStatus === 'overdue') {
+    const overdueText = overdueDurationText(reservation.plannedEndAt, now);
+    parts.push(overdueText ? `已超时 ${overdueText}` : '已超时');
+  }
+
+  return parts.join(' · ');
+}
+
+function timelineBoardDetails(board, now = new Date()) {
+  if (board.currentReservation) {
+    const overdueText = overdueDurationText(board.currentReservation.plannedEndAt, now);
+    return [
+      `<span>当前占用人：${escapeHtml(board.currentUserName || '未知用户')}</span>`,
+      `<span>计划归还：${escapeHtml(formatDate(board.currentReservation.plannedEndAt))}</span>`,
+      board.status === 'overdue'
+        ? `<span class="timeline-detail warning">已超时：${escapeHtml(overdueText || '1分钟内')}</span>`
+        : `<span>申请用途：${escapeHtml(board.currentReservation.purpose || '未填写')}</span>`,
+    ].join('');
+  }
+
+  if (board.nextReservation) {
+    return [
+      '<span>当前空闲</span>',
+      `<span>下次预约：${escapeHtml(formatDate(board.nextReservation.startedAt))}</span>`,
+      `<span>预约人：${escapeHtml(board.nextReservation.userName || '未知用户')}</span>`,
+    ].join('');
+  }
+
+  return ['<span>当前空闲</span>', '<span>暂无后续预约</span>', '<span>可直接从绿色空闲段发起预约</span>'].join('');
+}
+
+function timelineRowActions(board, firstFreeSlot) {
+  const isMine = board.currentUserId && board.currentUserId === state.user?.id;
+  const canReturn = board.currentReservationId && (isMine || state.user?.isAdmin);
+  const canRequestReturn = board.status === 'overdue' && board.currentReservationId && !isMine;
+  const startAtAttr = firstFreeSlot
+    ? ` data-start-at="${escapeHtml(new Date(firstFreeSlot.start).toISOString())}"`
+    : '';
+  const durationAttr = firstFreeSlot
+    ? ` data-duration-hours="${escapeHtml(firstFreeSlot.durationHours)}"`
+    : '';
+  const actions = [
+    `<button type="button" class="ghost-button" data-action="apply" data-board-id="${escapeHtml(board.id)}"${startAtAttr}${durationAttr} ${
+      firstFreeSlot ? '' : 'disabled'
+    }>预约</button>`,
+  ];
+
+  if (canReturn) {
+    actions.push(
+      `<button type="button" class="ghost-button" data-action="return" data-reservation-id="${escapeHtml(
+        board.currentReservationId,
+      )}">归还</button>`,
+    );
+  }
+
+  if (canRequestReturn) {
+    actions.push(
+      `<button type="button" data-action="request-return" data-reservation-id="${escapeHtml(
+        board.currentReservationId,
+      )}">请求归还</button>`,
+    );
+  }
+
+  return actions.join('');
+}
+
 function renderTimeline() {
   const timeline = state.timeline;
   if (!timeline) {
@@ -539,6 +688,7 @@ function renderTimeline() {
   const from = new Date(timeline.from);
   const to = new Date(timeline.to);
   const totalMs = to.getTime() - from.getTime();
+  const renderNow = new Date();
   const axis = Array.from({ length: 6 }, (_, index) => {
     const date = new Date(from.getTime() + (totalMs * index) / 5);
     return `<span>${escapeHtml(formatAxisDate(date))}</span>`;
@@ -550,16 +700,20 @@ function renderTimeline() {
       const freeSlotBlocks = freeSlots.map((slot) => renderFreeSlot(board, slot, from, totalMs)).join('');
       const reservationBlocks = reservations
         .map((reservation) => {
-          const start = Math.max(new Date(reservation.startedAt).getTime(), from.getTime());
-          const end = Math.min(new Date(reservation.plannedEndAt).getTime(), to.getTime());
-          const left = percentInRange(start, from, totalMs);
-          const width = Math.max(4, ((end - start) / totalMs) * 100);
-          return `<div class="timeline-block ${timelineBlockClass(reservation.status)}" style="left:${left}%;width:${width}%" title="${escapeHtml(
-            `${reservation.userName} ${formatDate(reservation.startedAt)} - ${formatDate(reservation.plannedEndAt)}`,
-          )}">
-            <strong>${escapeHtml(reservation.userName || '未知用户')}</strong>
-            <span>${escapeHtml(formatDate(reservation.startedAt))} - ${escapeHtml(formatDate(reservation.plannedEndAt))}</span>
-          </div>`;
+          return timelineSegments(reservation, from, to)
+            .map((segment) => {
+              const left = percentInRange(segment.start, from, totalMs);
+              const width = Math.max(4, ((segment.end - segment.start) / totalMs) * 100);
+              return `<div class="timeline-block ${timelineBlockClass(segment.status)} ${
+                segment.openEnded ? 'open-ended' : ''
+              }" style="left:${left}%;width:${width}%" title="${escapeHtml(
+                timelineBlockTitle(reservation, segment.status, renderNow),
+              )}">
+                <strong>${escapeHtml(reservation.userName || '未知用户')}</strong>
+                <span>${escapeHtml(timelineBlockSubtitle(reservation, segment.status, renderNow))}</span>
+              </div>`;
+            })
+            .join('');
         })
         .join('');
       const firstFreeSlot = freeSlots
@@ -568,20 +722,18 @@ function renderTimeline() {
           return { start, durationHours: suggestedDurationHours(slot, start) };
         })
         .find((slot) => slot.durationHours);
-      const firstStartAt = firstFreeSlot ? ` data-start-at="${escapeHtml(new Date(firstFreeSlot.start).toISOString())}"` : '';
-      const firstDuration = firstFreeSlot ? ` data-duration-hours="${escapeHtml(firstFreeSlot.durationHours)}"` : '';
 
       return `<div class="timeline-row">
         <div class="timeline-label">
-          <strong>${escapeHtml(board.boardNo)}</strong>
+          <div class="timeline-label-top">
+            <strong>${escapeHtml(board.boardNo)}</strong>
+            <span class="badge ${escapeHtml(board.status)}">${escapeHtml(statusText(board.status))}</span>
+          </div>
           <p>${escapeHtml(board.type || '未填写类型')}</p>
+          <div class="timeline-details">${timelineBoardDetails(board, renderNow)}</div>
         </div>
         <div class="timeline-canvas">${freeSlotBlocks}${reservationBlocks}</div>
-        <div class="timeline-action">
-          <button type="button" class="ghost-button" data-action="apply" data-board-id="${escapeHtml(board.id)}"${firstStartAt}${firstDuration} ${
-            firstStartAt ? '' : 'disabled'
-          }>预约</button>
-        </div>
+        <div class="timeline-action">${timelineRowActions(board, firstFreeSlot)}</div>
       </div>`;
     })
     .join('');

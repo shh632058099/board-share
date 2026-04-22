@@ -642,7 +642,38 @@ main {
 .timeline-action {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: center;
+}
+
+.timeline-row .timeline-label {
+  display: grid;
+  gap: 4px;
+}
+
+.timeline-label-top {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.timeline-details {
+  display: grid;
+  gap: 3px;
+}
+
+.timeline-details span {
+  color: #5b6770;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.timeline-detail.warning {
+  color: #9b2c2c;
+  font-weight: 600;
 }
 
 .timeline-canvas {
@@ -705,6 +736,13 @@ main {
   position: absolute;
   top: 10px;
   z-index: 2;
+}
+
+.timeline-block.open-ended::after {
+  border-right: 2px dashed rgb(31 41 51 / 0.55);
+  content: "";
+  inset: 6px 4px 6px auto;
+  position: absolute;
 }
 
 .timeline-block strong,

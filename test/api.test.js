@@ -151,6 +151,81 @@ test('allows return requests only after overdue and restores board after return'
   assert.equal(boards.payload.boards[0].status, 'available');
 });
 
+test('keeps overdue unreturned boards visible in timeline and blocks reuse until returned', async (t) => {
+  const { baseUrl, server, tmpDir } = await startTestServer();
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const created = await request(baseUrl, '/api/boards', {
+    method: 'POST',
+    body: { boardNo: 'B-002A', type: 'EVB' },
+  });
+  const boardId = created.payload.board.id;
+
+  const reserved = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-16T20:30:00+08:00',
+    body: { boardId, durationHours: 1, purpose: 'long running debug' },
+  });
+  const reservationId = reserved.payload.reservation.id;
+
+  const timeline = await request(
+    baseUrl,
+    '/api/timeline?from=2026-04-17T09%3A31%3A00.000%2B08%3A00&to=2026-04-17T12%3A00%3A00.000%2B08%3A00',
+    {
+      user: { id: 'ou_user_2', name: 'User 2' },
+      now: '2026-04-17T10:30:00+08:00',
+    },
+  );
+  assert.equal(timeline.status, 200);
+  assert.equal(timeline.payload.boards[0].board.status, 'overdue');
+  assert.equal(timeline.payload.boards[0].board.currentUserName, 'User 1');
+  assert.equal(timeline.payload.boards[0].reservations.length, 1);
+  assert.equal(timeline.payload.boards[0].reservations[0].status, 'overdue');
+  assert.equal(timeline.payload.boards[0].reservations[0].userName, 'User 1');
+
+  const blocked = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-17T10:30:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-17T11:00:00+08:00',
+      durationHours: 0.5,
+    },
+  });
+  assert.equal(blocked.status, 409);
+
+  const deleted = await request(baseUrl, `/api/boards/${boardId}`, {
+    method: 'DELETE',
+    now: '2026-04-17T10:30:00+08:00',
+  });
+  assert.equal(deleted.status, 409);
+
+  const returned = await request(baseUrl, `/api/reservations/${reservationId}/return`, {
+    method: 'POST',
+    user: { id: 'ou_user_1', name: 'User 1' },
+    now: '2026-04-17T10:40:00+08:00',
+    body: {},
+  });
+  assert.equal(returned.status, 200);
+
+  const replacement = await request(baseUrl, '/api/reservations', {
+    method: 'POST',
+    user: { id: 'ou_user_2', name: 'User 2' },
+    now: '2026-04-17T10:41:00+08:00',
+    body: {
+      boardId,
+      startAt: '2026-04-17T11:00:00+08:00',
+      durationHours: 0.5,
+    },
+  });
+  assert.equal(replacement.status, 201);
+});
+
 
 
 test('supports future reservations, overlap checks, and board timeline', async (t) => {
